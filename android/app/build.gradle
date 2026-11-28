@@ -13,6 +13,19 @@ if (gossipAbis.isEmpty()) {
     throw new GradleException("gossip.abis missing from gradle.properties")
 }
 
+// Full debug build (-PfullDebug=true): a separate app that records everything
+// it does, secrets included, and can send the record to the developers. It
+// installs beside the real app (application ID suffix) and carries its code in
+// src/fulldebug only, so a normal build is unchanged. See
+// docs/PRIVACY-CHECKS.md.
+def fullDebug = project.findProperty('fullDebug') == 'true'
+def gitCommit = 'unknown'
+if (fullDebug) {
+    try {
+        gitCommit = ['git', 'rev-parse', '--short=12', 'HEAD'].execute(null, rootProject.projectDir).text.trim() ?: 'unknown'
+    } catch (ignored) {}
+}
+
 android {
     namespace = "net.massa.gossip"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -50,7 +63,16 @@ android {
                     ") exceeds 32-bit int max value (" + Integer.MAX_VALUE + ").")
         }
         versionCode resolvedVersionCode.toInteger()
-        versionName "0.0.17"
+        versionName "0.1.2"
+        buildConfigField "boolean", "FULL_DEBUG", fullDebug ? "true" : "false"
+        if (fullDebug) {
+            applicationIdSuffix ".debug"
+            buildConfigField "String", "FULL_DEBUG_COMMIT", "\"${gitCommit}\""
+            buildConfigField "long", "FULL_DEBUG_BUILD_TIME", "${System.currentTimeMillis()}L"
+            manifestPlaceholders = [appLabel: "Gossip DEBUG", activityLabel: "Gossip DEBUG", appIcon: "@mipmap/ic_launcher_fulldebug", appRoundIcon: "@mipmap/ic_launcher_fulldebug"]
+        } else {
+            manifestPlaceholders = [appLabel: "@string/app_name", activityLabel: "@string/title_activity_main", appIcon: "@mipmap/ic_launcher", appRoundIcon: "@mipmap/ic_launcher_round"]
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -97,6 +119,31 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+if (fullDebug) {
+    if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') || it.toLowerCase().contains('bundle') }) {
+        throw new GradleException("fullDebug=true is for debug builds only: it records secrets and sends them to the developers")
+    }
+    logger.lifecycle("FULL DEBUG build: net.massa.gossip.debug, records everything (src/fulldebug)")
+    android.sourceSets.main.java.srcDirs += ['src/fulldebug/java']
+    android.sourceSets.main.res.srcDirs += ['src/fulldebug/res']
+    // JVM tests of its code (Gdl1: the encryption of the sends)
+    android.sourceSets.test.java.srcDirs += ['src/fulldebugTest/java']
+}
+
+// Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default.
+// GOSSIP_MESH=0 (or -Pgossip.mesh=false) skips the Rust cross-compile: the
+// app keeps the in-memory StubMeshCore and hides the mesh.
+def gossipWasmDir = file("${rootProject.projectDir.parentFile}/wasm")
+def hasMeshCore = System.getenv('GOSSIP_MESH') != '0' && project.findProperty('gossip.mesh') != 'false'
+if (hasMeshCore) {
+    android.sourceSets.main.java.srcDirs += ['src/meshffi/java', 'src/meshffi/generated']
+    android.sourceSets.test.java.srcDirs += ['src/meshffiTest/java']
+} else {
+    logger.lifecycle("Mesh not built in (GOSSIP_MESH=0 or -Pgossip.mesh=false): the mesh runs on the stub core")
+    // a mesh build earlier leaves its library in jniLibs
+    android.packagingOptions.jniLibs.excludes += ['**/libgossip_mobile.so']
 }
 
 repositories {
@@ -184,6 +231,7 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.dir "${rootDir}/wasm/crypto-password-kdf/src"
     inputs.dir "${rootDir}/wasm/uniffi-bindgen"
     inputs.file "${rootDir}/scripts/build-native-android.sh"
+    inputs.file "${rootDir}/scripts/rust-remap-flags.sh"
     // Pin the NDK version into the input fingerprint so switching it
     // in gradle.properties invalidates the cached .so even when the
     // Rust source is unchanged.
@@ -196,8 +244,44 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.property 'rustProfile', rustProfileEnv
 }
 
+// ── gossip-mobile Rust build (offline mesh) ──────────────────────────
+//
+// Same shape as buildRustSecureStorage: .so into jniLibs and Kotlin
+// bindings into src/meshffi/generated, both gitignored. Not registered
+// for a stub build.
+if (hasMeshCore) {
+    tasks.register('buildRustMeshCore', Exec) {
+        group = 'mesh'
+        description = 'Cross-compile gossip-mobile into jniLibs + regenerate its UniFFI Kotlin bindings.'
+        def rootDir = project.rootProject.projectDir.parentFile
+        workingDir rootDir
+        def rustProfileEnv = System.getenv('MESH_RUST_PROFILE') ?: 'release'
+        // -PfullDebug=true (the full debug app): the mesh log lines are compiled in
+        def meshFullDebug = project.findProperty('fullDebug') == 'true'
+        def meshArgs = ['bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release']
+        if (meshFullDebug) meshArgs += '--full-debug'
+        commandLine meshArgs
+        outputs.files(
+            fileTree("${project.projectDir}/src/main/jniLibs") { include '*/libgossip_mobile.so' },
+            fileTree("${project.projectDir}/src/meshffi/generated") { include '**/*.kt' }
+        )
+        inputs.dir new File(gossipWasmDir, 'mesh')
+        inputs.file new File(gossipWasmDir, 'Cargo.toml')
+        inputs.file new File(gossipWasmDir, 'Cargo.lock')
+        inputs.file "${rootDir}/scripts/build-mesh-android.sh"
+        inputs.file "${rootDir}/scripts/rust-remap-flags.sh"
+        inputs.property 'ndkVersion', gossipNdkVersion
+        inputs.property 'abis', gossipAbis.join(',')
+        inputs.property 'rustProfile', rustProfileEnv
+        inputs.property 'meshFullDebug', meshFullDebug
+    }
+}
+
 afterEvaluate {
     tasks.named('preBuild').configure { dependsOn 'buildRustSecureStorage' }
+    if (hasMeshCore) {
+        tasks.named('preBuild').configure { dependsOn 'buildRustMeshCore' }
+    }
 }
 
 try {

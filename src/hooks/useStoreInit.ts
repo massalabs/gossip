@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+import { useGroupStore } from '../stores/groupStore';
 import { getSdk } from '../stores/sdkStore';
 
 /**
@@ -12,6 +13,7 @@ export function useStoreInit() {
   const userProfile = useAccountStore(s => s.userProfile);
   const initDiscussionStore = useDiscussionStore(s => s.init);
   const initMessageStore = useMessageStore(s => s.init);
+  const initGroupStore = useGroupStore(s => s.init);
 
   useEffect(() => {
     // Only initialize when:
@@ -20,6 +22,8 @@ export function useStoreInit() {
     if (userProfile?.userId && getSdk().isSessionOpen) {
       // Initialize discussion store (synchronous)
       initDiscussionStore();
+      // Initialize group store (synchronous; a no-op without the engine)
+      initGroupStore();
       // Initialize message store (async)
       initMessageStore().catch(error => {
         logger.error('Failed to initialize message store:', error);
@@ -27,5 +31,10 @@ export function useStoreInit() {
     }
     // Note: getSdk().isSessionOpen is not reactive, but by the time userProfile
     // is available, the session should already be open
-  }, [userProfile?.userId, initDiscussionStore, initMessageStore]);
+  }, [
+    userProfile?.userId,
+    initDiscussionStore,
+    initMessageStore,
+    initGroupStore,
+  ]);
 }

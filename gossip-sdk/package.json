@@ -1,6 +1,6 @@
 {
   "name": "@massalabs/gossip-sdk",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "Gossip SDK for automation, chatbot, and integration use cases",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,6 +24,14 @@
     "./utils/logs.js": {
       "types": "./dist/utils/logs.d.ts",
       "import": "./dist/utils/logs.js"
+    },
+    "./utils/debugLog.js": {
+      "types": "./dist/utils/debugLog.d.ts",
+      "import": "./dist/utils/debugLog.js"
+    },
+    "./utils/debugFields.js": {
+      "types": "./dist/utils/debugFields.d.ts",
+      "import": "./dist/utils/debugFields.js"
     }
   },
   "scripts": {
@@ -55,7 +63,7 @@
     "vitest": "^4.0.17"
   },
   "dependencies": {
-    "@massalabs/massa-web3": "^5.3.0",
+    "@massalabs/massa-web3": "^5.4.0",
     "@noble/hashes": "^1.8.0",
     "@scure/base": "^2.0.0",
     "@scure/bip39": "^2.0.1",

@@ -6,6 +6,7 @@ import type { IDetectedBarcode } from '@yudiel/react-qr-scanner';
 import zxingReaderWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
 import { QRScannerProps } from './types';
 import ScannerBackButton from './ScannerBackButton';
+import { logPermission } from '../../utils/debugPermissions';
 
 // By default barcode-detector fetches the ZXing wasm from a public CDN
 // (jsdelivr). Serve the bundled copy instead so scanning never leaves the app:
@@ -29,22 +30,33 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
   onScan,
   onError,
   onClose,
+  continuous = false,
+  status,
+  stopped = false,
 }) => {
   const [isScanning, setIsScanning] = useState(true);
 
   const handleScan = useCallback(
     (detectedCodes: IDetectedBarcode[]) => {
       const firstCode = detectedCodes[0];
-      setIsScanning(false);
+      if (!firstCode) return;
+      // A continuous scan keeps reading the frames of an animated code
+      // until the parent sets `stopped`.
+      if (!continuous) setIsScanning(false);
       onScan(firstCode.rawValue);
     },
-    [onScan]
+    [onScan, continuous]
   );
 
   const handleError = useCallback(
     (error: unknown) => {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+      // A refused camera reaches the scanner as NotAllowedError.
+      logPermission('permission.result', 'camera', 'error', {
+        err: error instanceof Error ? error.name : typeof error,
+        msg: errorMessage,
+      });
       onError?.(errorMessage);
     },
     [onError]
@@ -53,7 +65,16 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
   return (
     <div className="relative app-max-w mx-auto h-full">
       {onClose && <ScannerBackButton onClose={onClose} />}
-      {isScanning && (
+      {continuous && status && !stopped && (
+        <div
+          className="absolute bottom-8 inset-x-4 z-20 rounded-xl bg-black/60 px-4 py-3 text-center text-sm text-white whitespace-pre-line"
+          role="status"
+          aria-live="polite"
+        >
+          {status}
+        </div>
+      )}
+      {isScanning && !stopped && (
         <Scanner
           onScan={handleScan}
           onError={handleError}

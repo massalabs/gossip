@@ -13,36 +13,41 @@ import {
   MESSAGE_ID_SIZE,
 } from '../db/index.js';
 import { type MessageRow } from '../db/index.js';
-import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { decodeUserId } from '../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
+  type SendOutcome,
+  type TransportConnectivity,
 } from '../api/messageProtocol/index.js';
 import { SessionStatus } from '../wasm/bindings.js';
 import { SessionModule } from '../wasm/index.js';
 import {
-  serializeRegularMessage,
-  serializeReplyMessage,
-  serializeForwardMessage,
   serializeKeepAliveMessage,
-  serializeDeleteMessage,
-  serializeEditMessage,
-  serializeReactionMessage,
-  serializeRetentionPolicyMessage,
   deserializeMessage,
+  isGroupMessage,
 } from '../utils/messageSerialization.js';
 import * as schema from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { Result } from '../utils/type.js';
-import { sessionStatusToString } from '../wasm/session.js';
+import {
+  sessionStatusToString,
+  SessionMessageTooLargeError,
+} from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
+import { NETWORK_RETENTION_MS } from '../config/protocol.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import { Queries } from '../db/queries/index.js';
 import { QueueManager } from '../utils/queue.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { GossipSqliteTx } from '../db/sqlite.js';
 import { POST_MESSAGE_TYPES } from '../utils/message.js';
+import { isSeekerConflict } from '../api/errors.js';
+import { sendTracked } from '../api/messageProtocol/composite.js';
+import type { SeekerConflictHandler } from './seekerConflicts.js';
+import { debugLogEnabled, dlog } from '../utils/debugLog.js';
+import { errFields, hex, shortId, since } from '../utils/debugFields.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -219,33 +224,54 @@ export interface SendMessageResult {
   error?: string;
 }
 
-interface Decrypted {
-  content: string;
-  sentAt: Date;
-  senderId: string;
-  seeker: Uint8Array;
-  messageId: Uint8Array; // 12-byte random ID
-  replyTo?: {
-    originalMsgId: Uint8Array;
+/**
+ * An incoming message read this long after its sender dated it is marked
+ * `delayed` in its metadata: it travelled by store-and-forward (a mesh, a
+ * bridge) or sat on a node while we were offline.
+ */
+const DELAYED_MESSAGE_MS = 10 * 60 * 1000;
+
+/**
+ * Clock skew tolerated before a sender's date is treated as ahead of ours.
+ * Beyond it, or when the session flags the message stale (dated before the
+ * previous one, or past the age window), the message is placed at the time
+ * we read it: otherwise the sender's clock alone would decide where it lands
+ * in the conversation, anywhere in the past or pinned below later messages.
+ */
+const FUTURE_DATED_MESSAGE_MS = 60 * 1000;
+
+/**
+ * Where an incoming message sits in the conversation, and whether to mark it
+ * delayed. `now` is when we read it.
+ */
+export function placeIncomingMessage(
+  sentAt: Date,
+  stale: boolean,
+  now: number
+): { timestamp: Date; delayed: boolean; untrustedSentAt: boolean } {
+  const untrustedSentAt =
+    stale || sentAt.getTime() > now + FUTURE_DATED_MESSAGE_MS;
+  return {
+    timestamp: untrustedSentAt ? new Date(now) : sentAt,
+    delayed: untrustedSentAt || now - sentAt.getTime() > DELAYED_MESSAGE_MS,
+    untrustedSentAt,
   };
-  forwardOf?: {
-    originalContent: string;
-    originalContactId?: Uint8Array;
-  };
-  deleteOf?: {
-    originalMsgId: Uint8Array;
-  };
-  editOf?: {
-    originalMsgId: Uint8Array;
-  };
-  reactionOf?: {
-    originalMsgId: Uint8Array;
-  };
-  encryptedMessage: Uint8Array;
-  type: MessageType;
 }
 
+/**
+ * The error of a send in the earlier one-to-one format (§2.1): conversations
+ * are groups, and nothing of that format is sent any more.
+ */
+export const LEGACY_FORMAT_NOT_SENT =
+  'The one-to-one format is no longer sent: conversations are groups';
+
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+/**
+ * How long a pushed message waits for its seeker to come up: the sessions'
+ * maximum message age, past which nobody could still send it.
+ */
+const PUSHED_MESSAGE_TTL_MS = NETWORK_RETENTION_MS;
 
 const logger = new Logger('MessageService');
 export class MessageService {
@@ -255,7 +281,17 @@ export class MessageService {
   private config: SdkConfig;
   private queueManager?: QueueManager;
   private processingContacts = new Set<string>();
-  private isFetchingMessages = false;
+  /** The fetch running now, if any. */
+  private fetching: Promise<MessageResult> | null = null;
+  /** The fetch queued to start once the running one ends (one at most). */
+  private fetchAgain: Promise<MessageResult> | null = null;
+  /** The read seekers last given to the wanted-seekers updater, base64. */
+  private lastWanted = new Set<string>();
+  /**
+   * Gives the transports that wait on seekers (a mesh node's wanted list)
+   * the seekers read now, without waiting for the fetch to end.
+   */
+  private wantedSeekersUpdater: ((seekers: Uint8Array[]) => void) | null = null;
   private queries: Queries;
   /**
    * Message ids currently being sent via `sendMessageFastPath`. The row is
@@ -280,15 +316,93 @@ export class MessageService {
    */
   private persistFlusher: () => Promise<void> = async () => {};
 
+  /**
+   * Receives the group plaintexts of the session messages of the group type:
+   * the sender's 32-byte user ID and the plaintext. Set by
+   * `GossipSdk.openSession`.
+   */
+  private groupPlaintextHandler:
+    | ((from: Uint8Array, plaintext: Uint8Array) => Promise<void>)
+    | null = null;
+
+  setGroupPlaintextHandler(
+    handler: ((from: Uint8Array, plaintext: Uint8Array) => Promise<void>) | null
+  ): void {
+    this.groupPlaintextHandler = handler;
+  }
+
   setPersistFlusher(flusher: () => Promise<void>): void {
     this.persistFlusher = flusher;
   }
 
-  /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
-  private emitMessageReceived(
-    message: Omit<Message, 'id'> & { id?: number }
+  /** Renews a session whose seekers the server already holds (409). */
+  private seekerConflicts?: SeekerConflictHandler;
+
+  /** See `wantedSeekersUpdater`. */
+  setWantedSeekersUpdater(
+    updater: ((seekers: Uint8Array[]) => void) | null
   ): void {
-    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message);
+    this.wantedSeekersUpdater = updater;
+  }
+
+  /**
+   * Tells the transports that wait on seekers the ones read now: called when
+   * they change outside a fetch (a session created or renewed, a login).
+   */
+  announceWantedSeekers(): void {
+    if (!this.session || !this.wantedSeekersUpdater) return;
+    const seekers = this.session.getMessageBoardReadKeys();
+    // A mesh node pushes only what it stores after a seeker is wanted: a blob
+    // it took before (the account was locked, the seeker not predicted yet,
+    // a relay) is only found by asking it. A new seeker is read at once.
+    if (this.giveWanted(seekers) && this.messageProtocol.isMeshEnabled?.()) {
+      void this.fetchMessages().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Gives `seekers` to the wanted-seekers updater; returns whether one of
+   * them was not given before.
+   */
+  private giveWanted(seekers: Uint8Array[]): boolean {
+    const keys = new Set(seekers.map(s => encodeToBase64(s)));
+    const added = [...keys].some(k => !this.lastWanted.has(k));
+    this.lastWanted = keys;
+    if (debugLogEnabled()) {
+      dlog('sdk', 'mesh.wanted.updated', {
+        count: keys.size,
+        added,
+        updater: this.wantedSeekersUpdater !== null,
+      });
+    }
+    this.wantedSeekersUpdater?.(seekers);
+    return added;
+  }
+  setSeekerConflictHandler(handler: SeekerConflictHandler): void {
+    this.seekerConflicts = handler;
+  }
+
+  /**
+   * A message refused because the server holds another value at its seeker.
+   * Resolves `true` when the session was renewed: the peer's queue now waits
+   * for the new session (and the caller stops sending to it on the old
+   * one). Otherwise the message failed for good: it is never retried.
+   */
+  private async seekerConflict(
+    contactUserId: string,
+    messageId: number
+  ): Promise<boolean> {
+    if (await this.seekerConflicts?.handle(contactUserId)) return true;
+    const latest = await this.queries.messages.getById(messageId);
+    if (latest) {
+      await this.queries.messages.updateById(messageId, {
+        status: MessageStatus.FAILED,
+        encryptedMessage: null,
+        seeker: null,
+        whenToSend: null,
+      });
+    }
+    return false;
   }
 
   constructor(
@@ -305,26 +419,89 @@ export class MessageService {
     this.queries = queries;
   }
 
+  /**
+   * Accepts messages a transport pushed instead of being polled for (a mesh
+   * node). They are kept until the fetch loop reaches their seeker, so one
+   * that arrives before its predecessor is not lost. Returns how many were new.
+   */
+  /**
+   * Seekers a pushed message may sit at: the next one of each peer, the ones
+   * after it, and where peers would address a re-announcement to us.
+   */
+  private wantedSeekers(): Uint8Array[] {
+    if (!this.session) return [];
+    return [
+      ...this.session.getMessageBoardReadKeys(),
+      ...this.session.getMessageBoardLookaheadKeys(),
+      ...this.session.getReannouncementMailboxKeys(),
+    ];
+  }
+
+  async ingestMessages(messages: EncryptedMessage[]): Promise<number> {
+    // anything at another seeker is not for us, or no longer readable
+    const wanted = new Set(this.wantedSeekers().map(s => encodeToBase64(s)));
+    const kept = messages.filter(m => wanted.has(encodeToBase64(m.seeker)));
+    const added = await this.queries.pendingEncryptedMessages.insertNew(kept);
+    if (debugLogEnabled()) {
+      dlog('sdk', 'message.pushed', {
+        offered: messages.length,
+        wanted: kept.length,
+        added,
+        seekers: kept.map(m => shortId(m.seeker)),
+      });
+    }
+    // A fetch running now may have read the inbox already: fetchMessages
+    // then reads it again once that one ends.
+    if (added > 0) await this.fetchMessages();
+    return added;
+  }
+
+  /** What the transports can reach; transports that cannot tell are taken as online. */
+  getConnectivity(): TransportConnectivity {
+    return this.messageProtocol.getConnectivity?.() ?? 'internet';
+  }
+
   setQueueManager(queueManager: QueueManager): void {
     this.queueManager = queueManager;
   }
 
-  async fetchMessages(): Promise<MessageResult> {
+  /**
+   * Reads the messages at the seekers the sessions wait on, round after
+   * round while they move on. A call made while a fetch runs gets one fetch
+   * that starts after that one ends (shared by every such call): what
+   * arrived meanwhile (a push, a late answer, a new wanted seeker) is read
+   * then, not at the next poll.
+   */
+  fetchMessages(): Promise<MessageResult> {
+    if (this.fetching) {
+      dlog('sdk', 'message.fetch.again', {
+        queued: this.fetchAgain !== null,
+      });
+      this.fetchAgain ??= this.fetching.then(() => {
+        this.fetchAgain = null;
+        return this.fetchMessages();
+      });
+      return this.fetchAgain;
+    }
+    const run = this.runFetch().finally(() => {
+      if (this.fetching === run) this.fetching = null;
+    });
+    this.fetching = run;
+    return run;
+  }
+
+  private async runFetch(): Promise<MessageResult> {
     const log = logger.forMethod('fetchMessages');
 
-    if (this.isFetchingMessages) {
-      log.info('fetch already in progress, skipping');
-      return { success: true, newMessagesCount: 0 };
-    }
-
-    this.isFetchingMessages = true;
     try {
       if (!this.session) throw new Error('Session module not initialized');
 
       let previousSeekers = new Set<string>();
       let iterations = 0;
-      let newMessagesCount = 0;
+      const newMessagesCount = 0;
       let seekers: Uint8Array[] = [];
+      // every seeker waited on during this fetch, to drop pushed messages once read
+      const waitedSeekers = new Map<string, Uint8Array>();
 
       while (true) {
         seekers = this.session.getMessageBoardReadKeys();
@@ -347,8 +524,72 @@ export class MessageService {
           break;
         }
 
-        const encryptedMessages =
-          await this.messageProtocol.fetchMessages(seekers);
+        for (const seeker of seekers) {
+          waitedSeekers.set(encodeToBase64(seeker), seeker);
+        }
+
+        // The seekers moved on (a message was read): a mesh node waits on
+        // the new ones from now, rather than from the end of this fetch,
+        // which waits for every transport. Until then the next message sits
+        // on the phones that hold it, since a blob nobody asked for only
+        // travels toward a peer that wants it. The local-only rules apply as
+        // at the end of a fetch (same updater).
+        if (iterations > 0) this.giveWanted(seekers);
+
+        // Messages pushed by a transport wait in the inbox until their seeker
+        // comes up; they are read after the fetched ones, so the first copy of a
+        // message the network served is offered first.
+        let encryptedMessages: EncryptedMessage[] = [];
+        let networkError: unknown;
+        const fetchStarted = performance.now();
+        try {
+          encryptedMessages = await this.messageProtocol.fetchMessages(seekers);
+        } catch (error) {
+          networkError = error;
+        }
+        const pushed =
+          await this.queries.pendingEncryptedMessages.getBySeekers(seekers);
+        if (debugLogEnabled()) {
+          dlog(
+            'sdk',
+            'message.fetch',
+            {
+              iteration: iterations,
+              seekers: seekers.length,
+              fetched: encryptedMessages.length,
+              pushed: pushed.length,
+              ...(networkError !== undefined && errFields(networkError)),
+            },
+            {
+              lvl: networkError !== undefined ? 'warn' : 'debug',
+              dur: since(fetchStarted),
+            }
+          );
+          for (const m of encryptedMessages) {
+            dlog('sdk', 'message.received', {
+              seeker: shortId(m.seeker),
+              size: m.ciphertext.length,
+              via: 'fetch',
+            });
+          }
+          for (const m of pushed) {
+            dlog('sdk', 'message.received', {
+              seeker: shortId(m.seeker),
+              size: m.ciphertext.length,
+              via: 'push',
+            });
+          }
+        }
+        if (networkError !== undefined && pushed.length === 0) {
+          if (iterations === 0) throw networkError;
+          break;
+        }
+        encryptedMessages = encryptedMessages.concat(
+          pushed.map(row => ({
+            seeker: row.seeker,
+            ciphertext: row.ciphertext,
+          }))
+        );
         previousSeekers = currentSeekers;
 
         if (encryptedMessages.length === 0) {
@@ -357,19 +598,20 @@ export class MessageService {
           continue;
         }
 
-        const { decrypted: decryptedMessages, acknowledgedSeekers } =
+        const { acknowledgedSeekers } =
           await this.decryptMessages(encryptedMessages);
-        if (decryptedMessages.length > 0) {
-          const storedIds = await this.storeDecryptedMessages(
-            decryptedMessages,
-            this.session.userIdEncoded
-          );
-          newMessagesCount += storedIds.length;
-        }
 
         log.info('acknowledged seekers', {
           acknowledgedSeekers: Array.from(acknowledgedSeekers),
         });
+        if (acknowledgedSeekers.size > 0 && debugLogEnabled()) {
+          dlog('sessions', 'message.acknowledged', {
+            count: acknowledgedSeekers.size,
+            seekers: [...acknowledgedSeekers].map(s =>
+              shortId(decodeFromBase64(s))
+            ),
+          });
+        }
 
         if (acknowledgedSeekers.size > 0) {
           log.info('processing acknowledged seekers', {
@@ -387,9 +629,30 @@ export class MessageService {
 
       try {
         await this.queries.activeSeekers.replaceAll(seekers);
+        this.lastWanted = new Set(seekers.map(s => encodeToBase64(s)));
         this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
+      }
+
+      try {
+        // a seeker waited on and then left behind has been read
+        for (const seeker of seekers) {
+          waitedSeekers.delete(encodeToBase64(seeker));
+        }
+        await this.queries.pendingEncryptedMessages.deleteBySeekers([
+          ...waitedSeekers.values(),
+        ]);
+        // a lookahead seeker the sender did not use after all (it drew a
+        // fresh one) is no longer wanted: what was pushed there goes too
+        await this.queries.pendingEncryptedMessages.deleteExceptSeekers(
+          this.wantedSeekers()
+        );
+        await this.queries.pendingEncryptedMessages.deleteFetchedBefore(
+          new Date(Date.now() - PUSHED_MESSAGE_TTL_MS)
+        );
+      } catch (error) {
+        log.error('failed to clean pushed messages', error);
       }
 
       if (newMessagesCount > 0) {
@@ -399,13 +662,12 @@ export class MessageService {
       return { success: true, newMessagesCount };
     } catch (err) {
       log.error('fetch failed', err);
+      dlog('sdk', 'message.fetch.failed', errFields(err), { lvl: 'error' });
       return {
         success: false,
         newMessagesCount: 0,
         error: err instanceof Error ? err.message : 'Unknown error',
       };
-    } finally {
-      this.isFetchingMessages = false;
     }
   }
 
@@ -488,347 +750,181 @@ export class MessageService {
     return result.messageId;
   }
 
+  /**
+   * Decrypts what the board holds for us. A session message is read for the
+   * session (its acknowledgements) and then by its type only (§2.1, §13.1): a
+   * group plaintext goes to the group engine, a keep-alive carries nothing,
+   * and anything else, the earlier one-to-one format and types this release
+   * does not know included, is ignored: no row, no event, no log of it.
+   */
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
-    decrypted: Decrypted[];
     acknowledgedSeekers: Set<string>;
   }> {
     const log = logger.forMethod('decryptMessages');
 
-    const decrypted: Decrypted[] = [];
     const acknowledgedSeekers: Set<string> = new Set();
 
     for (const msg of encrypted) {
+      const started = performance.now();
       try {
         const out = await this.session.feedIncomingMessageBoardRead(
           msg.seeker,
           msg.ciphertext
         );
-        if (!out) continue;
-
-        try {
-          const deserialized = deserializeMessage(out.message);
-
-          out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
-            acknowledgedSeekers.add(encodeToBase64(seeker))
+        if (!out) {
+          dlog(
+            'sessions',
+            'message.decrypt.none',
+            { seeker: shortId(msg.seeker), size: msg.ciphertext.length },
+            { dur: since(started) }
           );
-
-          // keep-alive messages are just useful to keep the session alive, we don't need to store them
-          if (deserialized.type === MessageType.KEEP_ALIVE) {
-            continue;
-          }
-
-          // Delete control messages are handled at storage time; keep them in decrypted array
-
-          if (
-            !deserialized.messageId ||
-            deserialized.messageId.length !== MESSAGE_ID_SIZE
-          ) {
-            log.warn('missing or invalid messageId, skipping message', {
-              messageId: deserialized.messageId,
-            });
-          }
-
-          decrypted.push({
-            content: deserialized.content,
-            sentAt: new Date(Number(out.timestamp)),
-            senderId: encodeUserId(out.user_id),
-            seeker: msg.seeker,
-            messageId: deserialized.messageId ?? new Uint8Array(),
-            encryptedMessage: msg.ciphertext,
-            type: deserialized.type,
-            replyTo: deserialized.replyTo,
-            forwardOf: deserialized.forwardOf,
-            deleteOf: deserialized.deleteOf,
-            editOf: deserialized.editOf,
-            reactionOf: deserialized.reactionOf,
-          });
-        } catch (deserializationError) {
-          log.error('deserialization failed', {
-            error:
-              deserializationError instanceof Error
-                ? deserializationError.message
-                : 'Unknown error',
-            seeker: encodeToBase64(msg.seeker),
-          });
+          continue;
         }
+
+        // Acknowledgements belong to the session, whatever the message holds.
+        out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
+          acknowledgedSeekers.add(encodeToBase64(seeker))
+        );
+
+        let deserialized: ReturnType<typeof deserializeMessage>;
+        try {
+          deserialized = deserializeMessage(out.message);
+        } catch (error) {
+          dlog(
+            'sessions',
+            'message.decrypted',
+            {
+              seeker: shortId(msg.seeker),
+              from: shortId(out.user_id),
+              size: out.message.length,
+              kind: 'undecodable',
+              acked: out.acknowledged_seekers.length,
+              ...errFields(error),
+            },
+            {
+              lvl: 'warn',
+              dur: since(started),
+              c: debugLogEnabled() ? { message: hex(out.message) } : undefined,
+            }
+          );
+          continue;
+        }
+        if (debugLogEnabled()) {
+          dlog(
+            'sessions',
+            'message.decrypted',
+            {
+              seeker: shortId(msg.seeker),
+              from: shortId(out.user_id),
+              size: out.message.length,
+              kind: isGroupMessage(deserialized)
+                ? 'group'
+                : String(deserialized.type),
+              acked: out.acknowledged_seekers.length,
+            },
+            { dur: since(started) }
+          );
+        }
+
+        // A group message is handed to the group engine, which keeps its
+        // own records; nothing about it is stored or logged here.
+        if (isGroupMessage(deserialized)) {
+          if (deserialized.groupPlaintext && this.groupPlaintextHandler) {
+            try {
+              await this.groupPlaintextHandler(
+                out.user_id,
+                deserialized.groupPlaintext
+              );
+            } catch (error) {
+              log.error('group plaintext not processed');
+              dlog(
+                'engine',
+                'engine.plaintext.failed',
+                { from: shortId(out.user_id), ...errFields(error) },
+                { lvl: 'error' }
+              );
+            }
+          }
+        }
+        // Keep-alives only keep the session alive; every other type is
+        // ignored.
       } catch (e) {
         log.error('decryption failed', {
           error: e instanceof Error ? e.message : 'Unknown error',
           seeker: encodeToBase64(msg.seeker),
         });
-      }
-    }
-
-    return { decrypted, acknowledgedSeekers };
-  }
-
-  private async storeDecryptedMessages(
-    decrypted: Decrypted[],
-    ownerUserId: string
-  ): Promise<number[]> {
-    const log = logger.forMethod('storeDecryptedMessages');
-
-    const storedIds: number[] = [];
-
-    for (const message of decrypted) {
-      // Handle delete control messages by updating the referenced message in-place
-      if (
-        message.type === MessageType.DELETED &&
-        message.deleteOf?.originalMsgId
-      ) {
-        const target = await this.findMessageByMsgId(
-          message.deleteOf.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!target || !target.id) {
-          log.warn('delete target not found', {
-            originalMsgId: encodeToBase64(message.deleteOf.originalMsgId),
-          });
-          continue;
-        }
-
-        const resDb = await this.PerformDeleteMessage(target);
-        if (!resDb.success) {
-          throw new Error(
-            resDb.error?.message ?? 'Failed to delete message from db'
+        if (debugLogEnabled()) {
+          dlog(
+            'sessions',
+            'message.decrypt.failed',
+            {
+              seeker: shortId(msg.seeker),
+              size: msg.ciphertext.length,
+              ...errFields(e),
+            },
+            {
+              lvl: 'error',
+              dur: since(started),
+              s: {
+                seeker: hex(msg.seeker),
+                ciphertext: hex(msg.ciphertext),
+              },
+            }
           );
         }
-
-        continue;
       }
-
-      // Handle EDIT control messages by updating the referenced message in-place
-      if (message.editOf?.originalMsgId) {
-        const target = await this.findMessageByMsgId(
-          message.editOf.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!target || !target.id) {
-          log.warn('edit target not found', {
-            originalMsgId: encodeToBase64(message.editOf.originalMsgId),
-          });
-          continue;
-        }
-
-        const mergedMetadata = {
-          ...(target.metadata ?? {}),
-          edited: true,
-        };
-
-        // Emit before DB write so UI updates instantly
-        this.emitMessageReceived({
-          ...target,
-          content: message.content,
-          metadata: mergedMetadata,
-        });
-
-        const res = await this.performEditMessage(
-          message.content,
-          target,
-          mergedMetadata
-        );
-        if (!res.success) {
-          throw new Error(res.error?.message ?? 'Failed to edit message in db');
-        }
-
-        // Do not insert a new message row for edit control messages
-        continue;
-      }
-
-      // Handle retention policy control messages by updating the discussion setting
-      if (message.type === MessageType.RETENTION_POLICY) {
-        const durationSeconds = parseInt(message.content, 10);
-        const duration =
-          isNaN(durationSeconds) || durationSeconds <= 0
-            ? null
-            : durationSeconds;
-        await this.queries.discussions.updateByOwnerAndContact(
-          ownerUserId,
-          message.senderId,
-          {
-            messageRetentionDuration: duration,
-            retentionPolicySetAt: duration ? Date.now() : null,
-          }
-        );
-        const discussion = await this.queries.discussions.getByOwnerAndContact(
-          ownerUserId,
-          message.senderId
-        );
-        if (!discussion) {
-          this.eventEmitter.emit(SdkEventType.ERROR, {
-            error: new Error(
-              'could no retrieve discussion after updating retention policy'
-            ),
-            context: 'storeDecryptedMessages',
-          });
-          continue;
-        }
-        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
-        // Do not insert a new message row for retention policy control messages
-        continue;
-      }
-
-      // Handle reaction messages by inserting a separate row
-      if (
-        message.type === MessageType.REACTION &&
-        message.reactionOf?.originalMsgId
-      ) {
-        const discussion = await this.queries.discussions.getByOwnerAndContact(
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!discussion) {
-          log.error('no discussion for incoming reaction message', {
-            senderId: message.senderId,
-            preview: message.content.slice(0, 16),
-          });
-          continue;
-        }
-
-        const id = await this.queries.messages.insert({
-          messageId: message.messageId,
-          ownerUserId,
-          contactUserId: discussion.contactUserId,
-          content: message.content,
-          type: MessageType.REACTION,
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
-          metadata: serializeMetadata({}),
-          reactionOf: serializeReactionOf(message.reactionOf),
-        });
-
-        this.emitMessageReceived({
-          id,
-          messageId: message.messageId,
-          ownerUserId,
-          contactUserId: discussion.contactUserId,
-          content: message.content,
-          type: MessageType.REACTION,
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
-          reactionOf: message.reactionOf,
-        });
-
-        storedIds.push(id);
-        // Do not update discussion lastMessageContent for reactions
-        continue;
-      }
-
-      const discussion = await this.queries.discussions.getByOwnerAndContact(
-        ownerUserId,
-        message.senderId
-      );
-
-      if (!discussion) {
-        log.error('no discussion for incoming message', {
-          senderId: message.senderId,
-          preview: message.content.slice(0, 50),
-        });
-        continue;
-      }
-
-      // If received msg has same messageId as a previously received msg
-      const isDuplicate = await this.handleDuplicateMessageId(
-        message,
-        ownerUserId
-      );
-
-      if (isDuplicate) {
-        log.info('Duplicate message received, skip  ping', {
-          senderId: message.senderId,
-          preview: message.content.slice(0, 30),
-        });
-        continue;
-      }
-
-      if (message.replyTo?.originalMsgId) {
-        const original = await this.findMessageByMsgId(
-          message.replyTo.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-        if (!original) {
-          log.warn('reply target not found', {
-            originalMsgId: encodeToBase64(message.replyTo.originalMsgId),
-          });
-        }
-      }
-
-      const incomingMsg: Omit<Message, 'id'> = {
-        messageId: message.messageId,
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: message.type,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
-        replyTo: message.replyTo,
-        forwardOf: message.forwardOf,
-      };
-
-      const id = await this.queries.messages.insert({
-        messageId: message.messageId,
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: message.type,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
-        metadata: serializeMetadata({}),
-        replyTo: serializeReplyTo(message.replyTo),
-        forwardOf: serializeForwardOf(message.forwardOf),
-      });
-
-      // Update discussion in SQLite
-      const now = new Date();
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: id,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.sentAt,
-        updatedAt: now,
-        lastSyncTimestamp: now,
-      });
-      await this.queries.discussions.incrementUnreadCount(discussion.id);
-
-      storedIds.push(id);
-
-      // Re-emit with DB id so the store patches the optimistic message
-      this.emitMessageReceived({ ...incomingMsg, id });
-      this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
     }
 
-    return storedIds;
+    return { acknowledgedSeekers };
   }
 
   /**
-   * Checks for duplicate incoming messages based on messageId (12-byte random).
-   * Returns true if a message with the same messageId already exists (skips storage).
+   * Metadata marking `msg` as sent over the mesh only (no internet node took
+   * it), for the UI to show it waits for a bridge; undefined otherwise.
    */
-  private async handleDuplicateMessageId(
-    message: Decrypted,
-    ownerUserId: string
-  ): Promise<boolean> {
-    if (message.messageId && message.messageId.length > 0) {
-      const existing = await this.queries.messages.findByMessageId(
-        ownerUserId,
-        message.senderId,
-        message.messageId
-      );
+  private meshOnlyMetadata(
+    msg: Message,
+    outcome: SendOutcome
+  ): Record<string, unknown> | undefined {
+    if (outcome.acceptedBy.includes('internet')) return undefined;
+    return { ...(msg.metadata ?? {}), via: 'mesh' };
+  }
 
-      if (existing) {
-        return true;
-      }
-    }
-    return false;
+  /**
+   * The backend's answer to a send that a mesh took first, which came after
+   * the message was marked sent: a 409 renews the session, as when the send
+   * fails with it, but the message stays sent (the mesh took it and may
+   * deliver it; it is never marked failed); a backend that took it clears
+   * the mesh mark, as `repostMeshOnly` would. Never rejects.
+   */
+  private watchLateAnswer(
+    contactUserId: string,
+    messageId: number,
+    outcome: SendOutcome
+  ): void {
+    if (outcome.acceptedBy.includes('internet')) return;
+    void outcome.settled
+      .then(async settled => {
+        const conflict = settled.failures.find(
+          f => f.kind === 'internet' && isSeekerConflict(f.error)
+        );
+        dlog('sdk', 'message.send.settled', {
+          row: messageId,
+          to: shortId(contactUserId),
+          by: settled.acceptedBy,
+          failed: settled.failures.map(f => f.kind),
+          conflict: conflict !== undefined,
+        });
+        if (conflict) {
+          await this.seekerConflicts?.handle(contactUserId);
+          return;
+        }
+        if (!settled.acceptedBy.includes('internet')) return;
+        const latest = await this.queries.messages.getById(messageId);
+        if (!latest || latest.status !== MessageStatus.SENT) return;
+        await this.clearMeshMark(latest, true);
+      })
+      .catch(() => undefined);
   }
 
   async findMessageByMsgId(
@@ -894,6 +990,12 @@ export class MessageService {
     log.info('queueing message', {
       messageType: message.type,
     });
+
+    // §2.1: the earlier one-to-one format is no longer sent; only the
+    // session's own keep-alives go through this queue.
+    if (message.type !== MessageType.KEEP_ALIVE) {
+      return { success: false, error: LEGACY_FORMAT_NOT_SENT };
+    }
 
     const peerId = decodeUserId(message.contactUserId);
     if (peerId.length !== 32) {
@@ -972,129 +1074,17 @@ export class MessageService {
     };
   }
 
+  /**
+   * The session message of a queued row. Only keep-alives are queued now
+   * (§2.1); a row of the earlier one-to-one format is never serialized again.
+   */
   private async serializeMessage(
     message: Message
   ): Promise<Result<Uint8Array, string>> {
-    const log = logger.forMethod('serializeMessage');
-
-    if (
-      !message.messageId &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      return {
-        success: false,
-        error: 'Message ID is required',
-      };
+    if (message.type === MessageType.KEEP_ALIVE) {
+      return { success: true, data: serializeKeepAliveMessage() };
     }
-
-    if (message.replyTo) {
-      const originalMessage = await this.findMessageByMsgId(
-        message.replyTo.originalMsgId,
-        message.ownerUserId,
-        message.contactUserId
-      );
-
-      if (!originalMessage) {
-        return {
-          success: false,
-          error: 'Original message not found for reply',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeReplyMessage(
-          message.content,
-          message.replyTo.originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else if (message.type === MessageType.KEEP_ALIVE) {
-      return {
-        success: true,
-        data: serializeKeepAliveMessage(),
-      };
-    } else if (message.type === MessageType.RETENTION_POLICY) {
-      const durationSeconds = parseInt(message.content, 10);
-      return {
-        success: true,
-        data: serializeRetentionPolicyMessage(
-          isNaN(durationSeconds) || durationSeconds < 0 ? 0 : durationSeconds
-        ),
-      };
-    } else if (message.type === MessageType.DELETED && message.deleteOf) {
-      // Serialize a delete control message targeting an existing messageId
-      const originalMsgId = message.deleteOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for delete messages',
-        };
-      }
-      return {
-        success: true,
-        data: serializeDeleteMessage(originalMsgId, message.messageId!),
-      };
-    } else if (message.editOf) {
-      const originalMsgId = message.editOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for edit messages',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeEditMessage(
-          message.content,
-          originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else if (message.forwardOf) {
-      try {
-        return {
-          success: true,
-          data: serializeForwardMessage(
-            message.forwardOf.originalContent ?? '',
-            message.content,
-            message.messageId!,
-            message.forwardOf.originalContactId
-          ),
-        };
-      } catch (error) {
-        log.error('failed to serialize forward message', error);
-        return {
-          success: false,
-          error: 'Failed to serialize forward message',
-        };
-      }
-    } else if (message.type === MessageType.REACTION && message.reactionOf) {
-      const originalMsgId = message.reactionOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for reaction messages',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeReactionMessage(
-          message.content,
-          originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else {
-      // Regular message with type tag
-      return {
-        success: true,
-        data: serializeRegularMessage(message.content, message.messageId!),
-      };
-    }
+    return { success: false, error: LEGACY_FORMAT_NOT_SENT };
   }
 
   /**
@@ -1183,6 +1173,17 @@ export class MessageService {
         // READY SQL write. The READY block below still handles retries
         // (delayed sends, post-failure retries), where the encrypted
         // bytes need to survive a restart.
+        // A row of the earlier one-to-one format that was never encrypted is
+        // never sent (§2.1): it stays in its archive, unsent. One encrypted
+        // before (READY) is sent as stored below: the session already moved
+        // for it, and the peer's chain of seekers needs it.
+        if (
+          currentStatus === MessageStatus.WAITING_SESSION &&
+          msg.type !== MessageType.KEEP_ALIVE
+        ) {
+          continue;
+        }
+
         if (
           currentStatus === MessageStatus.WAITING_SESSION &&
           sessionStatus === SessionStatus.Active
@@ -1201,10 +1202,20 @@ export class MessageService {
           }
 
           /* Encrypt message*/
-          const sendOutput = await this.session.sendMessage(
-            peerId,
-            serializedContent
-          );
+          let sendOutput: Awaited<ReturnType<SessionModule['sendMessage']>>;
+          try {
+            sendOutput = await this.session.sendMessage(
+              peerId,
+              serializedContent
+            );
+          } catch (error) {
+            // Refused before encryption: it may not fit one packet (§13.10).
+            if (!(error instanceof SessionMessageTooLargeError)) throw error;
+            log.error('queued message too large to encrypt', {
+              messageId: msg.id,
+            });
+            continue;
+          }
           if (!sendOutput) {
             log.info(
               'session manager returned null for queued message; will retry later',
@@ -1235,26 +1246,21 @@ export class MessageService {
           // session manager in `wasm/sessions/src/session_manager.rs`
           // and `session.rs`):
           //   - Window where network landed but persist did NOT:
-          //     B has advanced its peer-ratchet to the next expected
-          //     seeker. On A's restart, state is restored to the
-          //     pre-crash counter. A's send loop re-runs the row
-          //     (still WAITING_SESSION) and re-encrypts with the
-          //     OLD counter → produces a seeker B no longer expects
-          //     → B's `feed_incoming_message_board_read` finds no
-          //     matching peer and silently ignores the duplicate.
-          //     **No session kill.** The session-close branch in
-          //     `session_manager.rs:642` only fires after a peer is
-          //     matched AND `try_feed_incoming_message` returns None
-          //     (decrypt failure on a matched session) — neither
-          //     condition is met for a stale-seeker retry.
-          //   - Side-effect: A's row stays WAITING_SESSION and is
-          //     retried on every session refresh. The `acknowledged
-          //     _seekers` field of the next message B sends back
-          //     to A includes the seeker A originally published
-          //     (which B did receive successfully), and A's send
-          //     loop uses that to mark the row SENT and stop
-          //     retrying. So the "stuck retry" is self-healing as
-          //     soon as the conversation has any back-traffic.
+          //     on A's restart, state is restored to the pre-crash
+          //     ratchet and the row (still WAITING_SESSION) is
+          //     re-encrypted. The seeker comes from the restored seeker
+          //     keypair, so it is the SAME seeker with DIFFERENT bytes
+          //     (and a different next seeker inside).
+          //     * If B already read the first copy, B has moved on and
+          //       ignores the second: no session kill. But A's chain now
+          //       continues from the second copy, which B never read, so
+          //       B stops finding A's messages until a re-announcement.
+          //     * If B has not read it yet, which copy B sees depends on
+          //       the store: one value per seeker on a single node, but
+          //       a mesh can carry both. B reads whichever comes first.
+          //     A durable persist before the network write would close
+          //     this window at the cost of latency; READY retries below
+          //     already resend the stored bytes unchanged.
           //
           // Promise.all rejects on either failure:
           //   - Network failed → caught below, row → READY with
@@ -1262,19 +1268,52 @@ export class MessageService {
           //   - Persist failed → bubbles up, row stays
           //     WAITING_SESSION (no SENT update). The next session
           //     activation re-runs the loop.
+          const sendStarted = performance.now();
+          let freshOutcome: SendOutcome;
           try {
-            await Promise.all([
-              this.messageProtocol.sendMessage({
+            [freshOutcome] = await Promise.all([
+              sendTracked(this.messageProtocol, {
                 seeker,
                 ciphertext: encryptedMessage,
               }),
               this.persistFlusher(),
             ]);
+            dlog(
+              'sdk',
+              'message.sent',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                size: encryptedMessage.length,
+                retry: false,
+                by: freshOutcome.acceptedBy,
+              },
+              { dur: since(sendStarted) }
+            );
           } catch (error) {
+            dlog(
+              'sdk',
+              'message.send.failed',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                conflict: isSeekerConflict(error),
+                ...errFields(error),
+              },
+              { lvl: 'warn', dur: since(sendStarted) }
+            );
             log.error('network send failed for fresh message', {
               messageId: msg.id,
               error,
             });
+            if (isSeekerConflict(error)) {
+              if (await this.seekerConflict(contactUserId, msg.id)) break;
+              continue;
+            }
             await this.queries.messages.updateById(msg.id, {
               status: MessageStatus.READY,
               encryptedMessage,
@@ -1344,6 +1383,7 @@ export class MessageService {
           //     mostly in tap-to-sent perception, not raw
           //     throughput on rapid bursts.
           sentCount++;
+          const freshMeshMetadata = this.meshOnlyMetadata(msg, freshOutcome);
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
             status: MessageStatus.SENT,
@@ -1357,6 +1397,7 @@ export class MessageService {
               this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                 ...msg,
                 status: MessageStatus.SENT,
+                ...(freshMeshMetadata && { metadata: freshMeshMetadata }),
               });
             } catch (error) {
               log.error('failed to emit message sent event', {
@@ -1375,9 +1416,13 @@ export class MessageService {
             .updateById(msgId!, {
               status: MessageStatus.SENT,
               seeker,
-              encryptedMessage: null,
+              // only a mesh took it: kept for a server (repostMeshOnly)
+              encryptedMessage: freshMeshMetadata ? encryptedMessage : null,
               serializedContent: null,
               whenToSend: null,
+              ...(freshMeshMetadata && {
+                metadata: serializeMetadata(freshMeshMetadata),
+              }),
             })
             .catch(error => {
               log.error(
@@ -1385,6 +1430,7 @@ export class MessageService {
                 { messageId: msgId, error }
               );
             });
+          this.watchLateAnswer(contactUserId, msgId!, freshOutcome);
           continue;
         }
 
@@ -1426,27 +1472,51 @@ export class MessageService {
           }
 
           /* Sending on network */
+          const sendStarted = performance.now();
           try {
-            await this.messageProtocol.sendMessage({
+            const queuedOutcome = await sendTracked(this.messageProtocol, {
               seeker,
               ciphertext: encryptedMessage,
             });
+            dlog(
+              'sdk',
+              'message.sent',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                size: encryptedMessage.length,
+                retry: true,
+                by: queuedOutcome.acceptedBy,
+              },
+              { dur: since(sendStarted) }
+            );
 
             // update the db — check latest state to avoid race conditions
             const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
+            const queuedMeshMetadata = this.meshOnlyMetadata(
+              msg,
+              queuedOutcome
+            );
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
             ) {
               await this.queries.messages.updateById(msg.id, {
                 status: MessageStatus.SENT,
-                encryptedMessage: null,
+                // only a mesh took it: kept for a server (repostMeshOnly)
+                encryptedMessage: queuedMeshMetadata ? encryptedMessage : null,
                 serializedContent: null,
                 whenToSend: null,
+                ...(queuedMeshMetadata && {
+                  metadata: serializeMetadata(queuedMeshMetadata),
+                }),
               });
               sent = true;
+              this.watchLateAnswer(contactUserId, msg.id, queuedOutcome);
             }
 
             if (sent) {
@@ -1467,6 +1537,7 @@ export class MessageService {
                   this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                     ...msg,
                     status: MessageStatus.SENT,
+                    ...(queuedMeshMetadata && { metadata: queuedMeshMetadata }),
                   });
                 } catch (error) {
                   log.error('failed to emit message sent event', {
@@ -1477,10 +1548,29 @@ export class MessageService {
               }
             }
           } catch (error) {
+            dlog(
+              'sdk',
+              'message.send.failed',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                retry: true,
+                conflict: isSeekerConflict(error),
+                ...errFields(error),
+              },
+              { lvl: 'warn', dur: since(sendStarted) }
+            );
             log.error('network send failed for queued message', {
               messageId: msg.id,
               error,
             });
+            if (isSeekerConflict(error)) {
+              // Retried as stored, it would be refused for ever.
+              if (await this.seekerConflict(contactUserId, msg.id)) break;
+              continue;
+            }
             const latestRow = await this.queries.messages.getById(msg.id);
             if (
               latestRow && // ensure the discussion has not been deleted
@@ -1503,7 +1593,103 @@ export class MessageService {
   }
 
   /**
-   * Count pending outgoing messages for a contact (WAITING_SESSION/READY).
+   * Posts to a server the sent messages that only a mesh took, so that they
+   * reach the peer even when no bridge carries them; a mesh node uploads
+   * nothing unless it bridges. Their ciphertext stays in the account's own
+   * storage until then (and goes once the peer acknowledges them). Stops at
+   * the first failure: no server answers. Returns how many were posted.
+   */
+  async repostMeshOnly(): Promise<number> {
+    const log = logger.forMethod('repostMeshOnly');
+    const ownerUserId = this.session.userIdEncoded;
+    if (!ownerUserId || this.getConnectivity() === 'offline') return 0;
+    const rows = await this.queries.messages.getMeshOnlySent(ownerUserId);
+    let posted = 0;
+    for (const row of rows) {
+      if (!row.seeker || !row.encryptedMessage) continue;
+      // a 4xx but 429 is final: the server never takes it. A 409 means it
+      // holds another value at the seeker (an identical one is accepted):
+      // the session is behind what was already published, and is renewed.
+      let onServer = true;
+      const repostStarted = performance.now();
+      try {
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.encryptedMessage },
+          { internetOnly: true }
+        );
+      } catch (error) {
+        dlog(
+          'sdk',
+          'message.repost',
+          {
+            row: row.id,
+            to: shortId(row.contactUserId),
+            result: 'failed',
+            ...errFields(error),
+          },
+          { lvl: 'warn', dur: since(repostStarted) }
+        );
+        const reason = error instanceof Error ? error.message : '';
+        if (!/HTTP 4(?!29)\d\d/.test(reason)) {
+          log.info('no server took a mesh-only message; retried later', {
+            messageId: row.id,
+            error,
+          });
+          break;
+        }
+        onServer = false;
+        // Renewed: the message waits for the new session and is sent again.
+        if (
+          isSeekerConflict(error) &&
+          (await this.seekerConflicts?.handle(row.contactUserId))
+        ) {
+          continue;
+        }
+      }
+      if (onServer) {
+        dlog(
+          'sdk',
+          'message.repost',
+          { row: row.id, to: shortId(row.contactUserId), result: 'sent' },
+          { dur: since(repostStarted) }
+        );
+      }
+      const latest = await this.queries.messages.getById(row.id);
+      if (!latest || latest.status !== MessageStatus.SENT) continue;
+      await this.clearMeshMark(latest, onServer);
+      if (onServer) posted++;
+    }
+    return posted;
+  }
+
+  /**
+   * Drops the ciphertext a sent message kept for a server, and its mesh mark
+   * when a server took it (`onServer`).
+   */
+  private async clearMeshMark(
+    row: { id: number; metadata: string | null },
+    onServer: boolean
+  ): Promise<void> {
+    const metadata = deserializeMetadata(row.metadata) ?? {};
+    if (onServer) delete metadata.via;
+    await this.queries.messages.updateById(row.id, {
+      encryptedMessage: null,
+      metadata: serializeMetadata(
+        Object.keys(metadata).length > 0 ? metadata : undefined
+      ),
+    });
+    const updated = await this.queries.messages.getById(row.id);
+    if (updated) {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+        messages: [rowToMessage(updated)],
+      });
+    }
+  }
+
+  /**
+   * Count the outgoing messages for a contact that will still be sent
+   * (WAITING_SESSION/READY): a row of the earlier one-to-one format never
+   * encrypted stays unsent in its archive (§2.1) and does not count.
    */
   async getPendingSendCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
@@ -1511,7 +1697,11 @@ export class MessageService {
       ownerUserId,
       contactUserId
     );
-    return rows.length;
+    return rows.filter(
+      r =>
+        r.type === MessageType.KEEP_ALIVE ||
+        r.status !== MessageStatus.WAITING_SESSION
+    ).length;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1739,56 +1929,12 @@ export class MessageService {
   }
 
   /**
-   * Delete a message by its database ID (outgoing or incoming in 1-to-1).
-   * Marks the local message as deleted and enqueues a delete control message
-   * so the peer can mark their copy as deleted as well.
-   *
-   * Both sides can delete any message for plausible deniability.
+   * Deleting a message of an archive for everyone would send the earlier
+   * one-to-one format (§2.1): refused, nothing changes. Returns false.
    */
   async deleteMessage(id: number): Promise<boolean> {
-    const row = await this.queries.messages.getById(id);
-    if (!row) return false;
-    if (!row.messageId)
-      throw new Error('Cannot delete a message that has no messageId');
-
-    const ownerUserId = this.session.userIdEncoded;
-
-    const callbackAfterDbCommit: (() => void) | null =
-      await this.queries.conn.withTransaction(async tx => {
-        const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
-        if (!res.success) {
-          tx.rollback(); // if deleting the message from the db fails, rollback the transaction
-          throw new Error(
-            res.error?.message ?? 'Failed to delete message from db'
-          );
-        }
-
-        // Send the delete control message to the peer
-        const controlMessage: Omit<Message, 'id'> = {
-          ownerUserId,
-          contactUserId: row.contactUserId,
-          content: '',
-          type: MessageType.DELETED,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: new Date(),
-          deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-        };
-
-        const result = await this.sendMessage(controlMessage, tx);
-        if (!result.success) {
-          tx.rollback(); // if sending the delete control message fails, rollback the transaction
-          throw new Error(result.error ?? 'Failed to enqueue delete message');
-        }
-        return res.data;
-      }, 'immediate');
-
-    if (callbackAfterDbCommit) {
-      callbackAfterDbCommit();
-    }
-    await this.processSendQueueForContact(row.contactUserId);
-
-    return true;
+    void id;
+    return false;
   }
 
   async sendReaction(
@@ -1810,124 +1956,14 @@ export class MessageService {
     return result;
   }
 
-  private async performEditMessage(
-    newContent: string,
-    originalMsg: Message,
-    metadata: Record<string, unknown>,
-    tx?: GossipSqliteTx
-  ): Promise<Result<(() => void) | null, Error>> {
-    if (!originalMsg.id) {
-      return { success: false, error: new Error('Message ID is required') };
-    }
-    const db = tx ?? this.queries.conn.db;
-    let discussionUpdatedId: number | undefined;
-    try {
-      await db
-        .update(schema.messages)
-        .set({ content: newContent, metadata: serializeMetadata(metadata) })
-        .where(eq(schema.messages.id, originalMsg.id))
-        .returning();
-
-      const discussion = await this.queries.discussions.getByOwnerAndContact(
-        originalMsg.ownerUserId,
-        originalMsg.contactUserId,
-        tx
-      );
-      if (!discussion) {
-        return { success: false, error: new Error('Discussion not found') };
-      }
-      if (discussion.lastMessageId === originalMsg.id) {
-        await this.queries.discussions.updateById(
-          discussion.id,
-          {
-            lastMessageContent: newContent,
-            updatedAt: new Date(),
-          },
-          tx
-        );
-        discussionUpdatedId = discussion.id;
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-    }
-
-    const postDbCommit = () => {
-      if (discussionUpdatedId) {
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
-          discussionUpdatedId
-        );
-      }
-    };
-
-    if (!tx) {
-      // if we are not in a db transaction, we can just emit the event and return
-      postDbCommit();
-      return { success: true, data: null };
-    } else {
-      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
-      return { success: true, data: postDbCommit };
-    }
-  }
-
   /**
-   * Edit an outgoing message by its database ID.
-   * Updates the local content (preserving timestamp) and enqueues an edit
-   * control message so the peer can update their copy as well.
+   * Editing a message of an archive would send the earlier one-to-one format
+   * (§2.1): refused, nothing changes. Returns false.
    */
   async editMessage(id: number, newContent: string): Promise<boolean> {
-    const row = await this.queries.messages.getById(id);
-    if (!row) return false;
-    if (row.direction !== MessageDirection.OUTGOING) return false;
-    if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE)
-      throw new Error('Cannot edit a message that has no valid messageId');
-
-    const ownerUserId = this.session.userIdEncoded;
-
-    const existingMetadata = deserializeMetadata(row.metadata) ?? {};
-    const mergedMetadata = { ...existingMetadata, edited: true };
-
-    const callbackAfterDbCommit: (() => void) | null =
-      await this.queries.conn.withTransaction(async tx => {
-        const res = await this.performEditMessage(
-          newContent,
-          rowToMessage(row),
-          mergedMetadata,
-          tx
-        );
-        if (!res.success) {
-          tx.rollback();
-          throw new Error(res.error?.message ?? 'Failed to edit message in db');
-        }
-
-        const controlMessage: Omit<Message, 'id'> = {
-          ownerUserId,
-          contactUserId: row.contactUserId,
-          content: newContent,
-          type: MessageType.TEXT,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: new Date(),
-          editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-          metadata: { control: 'edit' },
-        };
-
-        const result = await this.sendMessage(controlMessage, tx);
-        if (!result.success) {
-          tx.rollback();
-          throw new Error(result.error ?? 'Failed to enqueue edit message');
-        }
-        return res.data;
-      }, 'immediate');
-
-    if (callbackAfterDbCommit) {
-      callbackAfterDbCommit();
-    }
-    await this.processSendQueueForContact(row.contactUserId);
-    return true;
+    void id;
+    void newContent;
+    return false;
   }
 
   /**

@@ -16,6 +16,7 @@ import {
   isXiaomiManufacturer,
   type DeviceReliabilityInfo,
 } from '../utils/deviceInfo';
+import { logPermission } from '../utils/debugPermissions';
 
 // Storage key for dismissing battery optimization prompt
 const BATTERY_OPTIMIZATION_DISMISSED_KEY =
@@ -71,6 +72,8 @@ interface BatteryOptimizationPluginInterface {
   openBatteryOptimizationSettings(): Promise<void>;
   openAppSettings(): Promise<void>;
   openXiaomiAutoStartSettings(): Promise<void>;
+  isPowerSaveMode(): Promise<{ isPowerSave: boolean }>;
+  openBatterySaverSettings(): Promise<void>;
 
   // Comprehensive status (preferred for efficiency)
   getBackgroundSyncStatus(): Promise<BackgroundSyncStatus>;
@@ -154,6 +157,9 @@ class BatteryOptimizationService {
   private async doRefreshStatus(): Promise<BackgroundSyncStatus | null> {
     try {
       const status = await BatteryOptimizationPlugin.getBackgroundSyncStatus();
+      logPermission('permission.check', 'battery-optimization', null, {
+        ...status,
+      });
       this.cachedStatus = status;
       this.lastCheckTime = Date.now();
 
@@ -287,6 +293,40 @@ class BatteryOptimizationService {
       return true;
     } catch (error) {
       logger.error('Failed to open battery optimization settings:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Whether battery saver is on (Android). It slows Bluetooth scanning while
+   * the screen is off.
+   */
+  async isPowerSaveMode(): Promise<boolean> {
+    if (!this.isAndroidNative()) {
+      return false;
+    }
+
+    try {
+      return (await BatteryOptimizationPlugin.isPowerSaveMode()).isPowerSave;
+    } catch (error) {
+      logger.error('Failed to check battery saver:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Open the battery saver settings; an app cannot turn it off itself.
+   */
+  async openBatterySaverSettings(): Promise<boolean> {
+    if (!this.isAndroidNative()) {
+      return false;
+    }
+
+    try {
+      await BatteryOptimizationPlugin.openBatterySaverSettings();
+      return true;
+    } catch (error) {
+      logger.error('Failed to open battery saver settings:', error);
       return false;
     }
   }

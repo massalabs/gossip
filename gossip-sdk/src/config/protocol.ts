@@ -11,9 +11,11 @@ export interface ProtocolConfig {
   retryAttempts: number;
 }
 
-// Default API URL for the hosted REST protocol.
-// Override via setProtocolBaseUrl() or environment variables.
-const DEFAULT_API_URL = 'https://api.usegossip.com';
+// Default API URL for the hosted REST protocol: version 2 of the Gossip API,
+// which the server exposes under `/v2` (`/api` without a prefix is version 1,
+// kept for older apps). Override via setProtocolBaseUrl() or environment
+// variables; a gossip-node serves the same contract at its origin.
+const DEFAULT_API_URL = 'https://api.usegossip.com/v2';
 
 // Mutable config that can be updated at runtime
 let currentBaseUrl: string | null = null;
@@ -61,6 +63,14 @@ function buildProtocolApiBaseUrl(): string {
   const trimmed = apiUrl.replace(/\/+$/, '');
   return `${trimmed}/api`;
 }
+
+/**
+ * How long the network keeps a message: the backend and the mesh nodes keep a
+ * blob 14 days (`retention_ms` in `gossip-pools`), the sessions' maximum
+ * message age. Past it a message can no longer be fetched, and a peer that
+ * still got it would flag it stale.
+ */
+export const NETWORK_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 export const protocolConfig: ProtocolConfig = {
   get baseUrl() {

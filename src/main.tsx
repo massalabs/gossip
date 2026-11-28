@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { configureAppLogging, logger } from './utils/logger.ts';
+import { installDebugUiEvents } from './utils/debugUi.ts';
 import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
@@ -11,11 +12,21 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
+import { FULL_DEBUG } from './config/fullDebug';
+import {
+  attachMeshArrivals,
+  createMeshTransport,
+  probeMeshAvailability,
+  isMeshEnabled,
+  startMesh,
+} from './services/meshNode';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 import UnsupportedStorageReset from './components/UnsupportedStorageReset';
+import OpenElsewhere from './components/OpenElsewhere';
+import { runSingleInstance } from './services/instanceLock';
 import {
   isUnsupportedStorageResetRequested,
   isUnsupportedStorageVersionError,
@@ -64,12 +75,19 @@ document.addEventListener('keydown', e => {
 // Configure the shared app/SDK logger before creating the SDK so all
 // runtime logging uses the same sinks. Release builds configure no sinks.
 configureAppLogging();
+// Inert until a debug log sink is installed (full debug build only).
+installDebugUiEvents();
 
 const isNative = Capacitor.isNativePlatform();
 
 async function bootstrap() {
+  // Null where the mesh is unavailable: the SDK then builds its default REST
+  // transport. Elsewhere the mesh member stays off until the user turns it on.
+  await probeMeshAvailability();
+  const meshTransport = createMeshTransport();
   const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
+    messageProtocol: meshTransport?.messageProtocol,
     config: { polling: { enabled: true } },
     storage: SECURE_STORAGE_ENABLED
       ? {
@@ -81,6 +99,18 @@ async function bootstrap() {
         ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
         : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   });
+
+  if (meshTransport) {
+    await attachMeshArrivals(sdk, meshTransport.mesh);
+    if (await isMeshEnabled()) {
+      // No permission or no Bluetooth: the app runs on REST alone, as before.
+      await startMesh().catch(error => {
+        if (import.meta.env.DEV) {
+          logger.warn('[MeshNode] mesh not started', error);
+        }
+      });
+    }
+  }
 
   await initSafeArea();
   return sdk;
@@ -94,7 +124,34 @@ const renderUnsupportedStorageReset = () => {
   );
 };
 
+const renderOpenElsewhere = () => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <OpenElsewhere />
+    </StrictMode>
+  );
+};
+
 async function start() {
+  // Full debug build only: the record starts before anything else, so that
+  // it holds a failed start, a failed login or a broken database.
+  if (FULL_DEBUG) {
+    try {
+      const { bootFullDebug } = await import('./fullDebug/boot');
+      await bootFullDebug();
+    } catch {
+      // the app runs without the record
+    }
+  }
+  // One tab of the web app at a time, decided before any storage is opened.
+  if (!isNative) {
+    await runSingleInstance(startApp, renderOpenElsewhere);
+    return;
+  }
+  await startApp();
+}
+
+async function startApp() {
   if (isUnsupportedStorageResetRequested()) {
     renderUnsupportedStorageReset();
     return;

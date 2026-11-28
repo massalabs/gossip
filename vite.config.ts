@@ -1,6 +1,7 @@
 import path from 'path';
+import { createPublicKey } from 'node:crypto';
 import { VitePWA } from 'vite-plugin-pwa';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { transformSync } from 'esbuild';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -92,13 +93,76 @@ function stripReleaseConsolePlugin(): Plugin {
   };
 }
 
+/**
+ * The full debug build encrypts every send to the developers' public key
+ * (src/fullDebug/gdl1.ts): without a valid key it must not build at all, so
+ * that no tester ever holds an app that cannot send, or that sends plaintext.
+ */
+function checkFullDebugKey(mode: string): void {
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  if (env.VITE_FULL_DEBUG !== 'true') return;
+  const b64 = (env.VITE_DEBUG_LOGS_PUBLIC_KEY ?? '').replace(/\s+/g, '');
+  const fail = (why: string) => {
+    throw new Error(
+      `Full debug build refused: ${why}. Set VITE_DEBUG_LOGS_PUBLIC_KEY to the ` +
+        'base64 DER (SubjectPublicKeyInfo, the PEM body on one line) of the ' +
+        "developers' P-256 public key. The full debug app encrypts every send " +
+        'to it and has no plaintext fallback.'
+    );
+  };
+  if (!b64) fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not set');
+  try {
+    const key = createPublicKey({
+      key: Buffer.from(b64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+    if (key.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+      fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not a P-256 key');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Full debug'))
+      throw error;
+    fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not a public key in base64 DER');
+  }
+}
+
+/**
+ * The full debug build (npm run build:full-debug) uses the wasm bundle built
+ * with the group engine's debug events (npm run wasm:build:main:full-debug,
+ * cargo feature `full-debug`) instead of the committed normal one. The SDK
+ * names the bundle as `../assets/generated/wasm/…` both in imports
+ * (bindings.ts) and in `new URL(…, import.meta.url)` (loader.ts), which an
+ * alias does not reach: the path is rewritten in the source of
+ * gossip-sdk/src/wasm/ before Vite resolves either. Only that build adds this
+ * plugin, to the app and to the service worker.
+ */
+function fullDebugWasmPlugin(): Plugin {
+  const dir = path.resolve(__dirname, 'gossip-sdk/src/wasm') + path.sep;
+  return {
+    name: 'full-debug-wasm',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.startsWith(dir)) return null;
+      return {
+        code: code.replaceAll(
+          '../assets/generated/wasm/',
+          '../assets/generated/wasm-full-debug/'
+        ),
+        map: null,
+      };
+    },
+  };
+}
+
 // https://vitejs.dev/config/
-export default defineConfig({
+const config = defineConfig({
   plugins: [
+    ...(process.env.VITE_FULL_DEBUG === 'true' ? [fullDebugWasmPlugin()] : []),
     stripReleaseConsolePlugin(),
     react(),
     tailwindcss(),
-    mkcert(), // ← Enables HTTPS locally
+    mkcert(), // Enables HTTPS locally: HTTPS is required for LAN camera, crypto and service worker access.
     crossOriginIsolation(), // ← Sets COOP/COEP for SharedArrayBuffer (rayon WASM)
     nodePolyfills({
       // Whether to polyfill `node:` protocol imports.
@@ -195,6 +259,11 @@ export default defineConfig({
         // load their binary at runtime, so an offline start fails without it.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,txt,wasm}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024, // 6MB (crypto polyfills, QR scanner, WASM)
+        // The service worker is a build of its own: it gets the same wasm
+        // bundle as the app (see fullDebugWasmPlugin).
+        ...(process.env.VITE_FULL_DEBUG === 'true'
+          ? { buildPlugins: { vite: [fullDebugWasmPlugin()] } }
+          : {}),
       },
 
       devOptions: {
@@ -236,4 +305,33 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+});
+
+export default defineConfig(({ command, mode, isPreview }) => {
+  checkFullDebugKey(mode);
+  // Native live reload uses DEV_SERVER_URL and retains its existing configuration.
+  if (command !== 'serve' || isPreview || process.env.DEV_SERVER_URL)
+    return config;
+
+  const { VITE_GOSSIP_API_URL: apiUrl } = loadEnv(mode, process.cwd(), 'VITE_');
+  if (!apiUrl?.startsWith('http://')) return config;
+
+  // Keep the browser in a secure context and proxy HTTP APIs only during web dev.
+  const apiProxyPath = '/__gossip_api';
+  return {
+    ...config,
+    define: {
+      'import.meta.env.VITE_GOSSIP_API_URL': JSON.stringify(apiProxyPath),
+    },
+    server: {
+      ...config.server,
+      proxy: {
+        [apiProxyPath + '/']: {
+          target: apiUrl.replace(/\/+$/, ''),
+          changeOrigin: true,
+          rewrite: requestPath => requestPath.slice(apiProxyPath.length),
+        },
+      },
+    },
+  };
 });

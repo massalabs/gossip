@@ -1,0 +1,143 @@
+//! # groups
+//!
+//! Pure logic of the plausibly deniable group chats protocol
+//! (`gossip-sdk/docs/plausibly-deniable-group-chats.md`, wire version 1): identifiers and the
+//! hash projection, roots, signed objects, message events, the wire format, and the message
+//! state of an epoch with its merge rules and storage records.
+//!
+//! The crate does no I/O: no network, no clock, no randomness source and no storage.
+//! Randomness (secrets, challenges, event IDs, signing randomness) and the current time are
+//! arguments.
+//!
+//! - [`hash`]: `H(domain, ...) = BLAKE3(CBOR([domain, ...]))` and every derived ID (§1.2, §3).
+//! - [`Root`]: the signed root of an epoch, its validation and verification (§4).
+//! - [`Leave`], [`Kick`], [`Dissolve`]: the signed objects (§5.3, §5.6, §5.8).
+//! - [`MessageEvent`]: the message event and its result projection (§6).
+//! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
+//! - [`Epoch`]: receiving and merging message events, scheduled versions and deletions,
+//!   retention, and local changes (§6.3, §7, §8, §9).
+//! - [`store`]: the local records of §14.1 and the storage trait, with an in-memory store.
+//! - [`dag`]: tips, the cycle frontier and parent selection (§6.1, §12.1).
+//! - [`display`]: visibility, order and the time of a root's line (§7.5).
+
+#![warn(missing_docs)]
+
+// ── Debug events of the full debug build ─────────────────────────────────────
+//
+// `dbg_event!`, `dbg_do!` and `dbg_ctx!` exist in both configurations. Without the cargo
+// feature `full-debug` they expand to nothing, arguments included: nothing is evaluated,
+// allocated or compiled in, so a normal build is the same as one without them. See
+// `debug.rs`.
+
+/// `dbg_event!(Level, "name", { "k" => v, … } [, c { … }] [, s { … }])`: one debug event.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_event {
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { }, { })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        c { $($ck:literal => $cv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { $($ck => $cv),* }, { })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        s { $($sk:literal => $sv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { }, { $($sk => $sv),* })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        c { $($ck:literal => $cv:expr),* $(,)? },
+        s { $($sk:literal => $sv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { $($ck => $cv),* }, { $($sk => $sv),* })
+    };
+    (@emit $lvl:ident, $ev:literal, { $($k:literal => $v:expr),* },
+        { $($ck:literal => $cv:expr),* }, { $($sk:literal => $sv:expr),* }) => {
+        if $crate::debug::enabled() {
+            $crate::debug::emit(&$crate::debug::DebugEvent {
+                ev: $ev,
+                lvl: $crate::debug::Level::$lvl,
+                f: vec![$(($k, $crate::debug::IntoVal::into_val($v))),*],
+                c: vec![$(($ck, $crate::debug::IntoVal::into_val($cv))),*],
+                s: vec![$(($sk, $crate::debug::IntoVal::into_val($sv))),*],
+            });
+        }
+    };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_event {
+    ($($t:tt)*) => {};
+}
+
+/// `dbg_do! { statements }`: statements that exist only in the full debug build (counters of
+/// a debug event). They must not change anything the engine reads.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_do {
+    ($($t:tt)*) => { $($t)* };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_do {
+    ($($t:tt)*) => {};
+}
+
+/// `dbg_ctx!(via, size)`: how the item being received arrived, for its verdict line.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_ctx {
+    ($via:expr, $size:expr) => {
+        $crate::debug::set_ctx($via, $size)
+    };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_ctx {
+    ($($t:tt)*) => {};
+}
+
+pub mod cbor;
+pub mod constants;
+pub use constants as fixed;
+pub mod dag;
+#[cfg(feature = "full-debug")]
+pub mod debug;
+pub mod display;
+mod epoch;
+mod error;
+mod event;
+pub mod hash;
+mod ids;
+mod keys;
+pub mod node;
+mod redact;
+mod rng;
+mod root;
+mod signed;
+pub mod store;
+pub mod wire;
+
+#[cfg(test)]
+mod sim;
+#[cfg(test)]
+mod sim_groups;
+#[cfg(test)]
+mod sim_net;
+#[cfg(test)]
+mod sim_report;
+#[cfg(test)]
+mod test_support;
+
+pub use epoch::local::{ChangeError, LocalEdit, MetadataPatch, Published};
+pub use epoch::{
+    Epoch, GroupState, MAX_TIMER_WAIT_MS, Merge, Outcome, Received, Rejection, Sender,
+};
+pub use error::{Error, Result};
+pub use event::{
+    Body, Content, Media, MessageEvent, MessageType, Payload, Reaction, ReactionAction,
+    ReplyTarget, check_mimetype, decode_reply_to, encode_reply_to,
+};
+pub use ids::{
+    Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,
+    ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
+};
+pub use keys::{
+    IdentitySigner, KeySigner, SignatureBytes, Signer, check_key_answer, parse_user_public_keys,
+};
+pub use rng::Randomness;
+pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
+pub use signed::{Dissolve, Kick, Leave};
+pub use wire::EventObject;

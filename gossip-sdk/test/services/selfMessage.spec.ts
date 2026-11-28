@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   SelfMessageService,
   SELF_CONTACT_ID,
+  reencryptSelfMessages,
 } from '../../src/services/selfMessage';
 import {
   getTestQueries,
@@ -20,6 +21,69 @@ import {
 
 describe('SelfMessageService', () => {
   beforeEach(clearAllTables);
+
+  it('reencryptSelfMessages moves notes and reactions to a new key', async () => {
+    const queries = getTestQueries();
+    const oldKey = await generateEncryptionKey();
+    const newKey = await generateEncryptionKey();
+    const ownerUserId = 'owner-self-rekey';
+    const before = new SelfMessageService(queries, ownerUserId, oldKey);
+    await before.ensureDiscussionExists();
+    const first = await before.send('first note');
+    await before.send('second note');
+    await before.sendReaction('👍', first.id as number);
+
+    // Another account's notes in the same table must not be touched.
+    const otherKey = await generateEncryptionKey();
+    const other = new SelfMessageService(queries, 'someone-else', otherKey);
+    await other.ensureDiscussionExists();
+    await other.send('not mine');
+
+    const result = await reencryptSelfMessages(
+      queries,
+      ownerUserId,
+      oldKey,
+      newKey
+    );
+    expect(result).toEqual({ rewritten: 3, unreadable: 0 });
+
+    const after = new SelfMessageService(queries, ownerUserId, newKey);
+    expect((await after.getMessages()).map(m => m.content)).toEqual([
+      'first note',
+      'second note',
+    ]);
+    expect((await after.getReactions()).map(r => r.emoji)).toEqual(['👍']);
+    // The old key no longer reads anything.
+    expect(await before.getMessages()).toEqual([]);
+    expect((await other.getMessages()).map(m => m.content)).toEqual([
+      'not mine',
+    ]);
+  });
+
+  it('reencryptSelfMessages leaves rows it cannot open untouched', async () => {
+    const queries = getTestQueries();
+    const strayKey = await generateEncryptionKey();
+    const oldKey = await generateEncryptionKey();
+    const newKey = await generateEncryptionKey();
+    const ownerUserId = 'owner-self-stray';
+    const stray = new SelfMessageService(queries, ownerUserId, strayKey);
+    await stray.ensureDiscussionExists();
+    await stray.send('written under another key');
+    const current = new SelfMessageService(queries, ownerUserId, oldKey);
+    await current.send('readable');
+
+    const result = await reencryptSelfMessages(
+      queries,
+      ownerUserId,
+      oldKey,
+      newKey
+    );
+    expect(result).toEqual({ rewritten: 1, unreadable: 1 });
+    // Still recoverable with the key it was written under.
+    expect((await stray.getMessages()).map(m => m.content)).toEqual([
+      'written under another key',
+    ]);
+  });
 
   it('ensureDiscussionExists creates a self discussion once and is idempotent', async () => {
     const queries = getTestQueries();

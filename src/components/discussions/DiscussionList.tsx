@@ -23,7 +23,20 @@ import {
   useFilteredContacts,
   useVirtualItems,
 } from './hooks/useDiscussionListItems';
-import type { Discussion } from '@massalabs/gossip-sdk';
+import type {
+  Discussion,
+  GroupInvitation,
+  LeaveChoice,
+} from '@massalabs/gossip-sdk';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '../../constants/routes';
+import { useGroupStore } from '../../stores/groupStore';
+import { useAccountStore } from '../../stores/accountStore';
+import {
+  isAcceptedContact,
+  isConversationRow,
+  isDirectChatInvitationFrom,
+} from '../../utils/conversations';
 
 // =============================================================================
 // Types
@@ -36,6 +49,11 @@ interface DiscussionListProps {
   searchQuery?: string;
   scrollParent: HTMLElement;
   filter?: DiscussionFilter;
+  /**
+   * The archived list's "No archived chats" when it holds no earlier chat;
+   * false when archived current chats are shown above it.
+   */
+  showEmpty?: boolean;
 }
 
 // =============================================================================
@@ -92,6 +110,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   searchQuery = '',
   scrollParent,
   filter = 'all',
+  showEmpty = true,
 }) => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
@@ -99,9 +118,49 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   scrollRef.current = scrollParent;
 
   // Store selectors
-  const discussions = useDiscussionStore(s => s.discussions);
+  const allDiscussions = useDiscussionStore(s => s.discussions);
   const lastMessages = useDiscussionStore(s => s.lastMessages);
-  const contacts = useDiscussionStore(s => s.contacts);
+  const allContacts = useDiscussionStore(s => s.contacts);
+  const groups = useGroupStore(s => s.groups);
+  const invitations = useGroupStore(s => s.invitations);
+  // Automatic connections are no contacts (§5.12).
+  const contacts = React.useMemo(
+    () => allContacts.filter(isAcceptedContact),
+    [allContacts]
+  );
+  // Archives and requests are rows; a discussion continued by a direct chat
+  // held here is shown through that group. The archived list is apart.
+  const discussions = React.useMemo(() => {
+    const held = new Set(groups.map(g => g.summary.groupId));
+    return allDiscussions.filter(
+      d =>
+        isConversationRow(
+          d,
+          allContacts.find(c => c.userId === d.contactUserId),
+          held
+        ) && (filter === 'archived') === !!d.archived
+    );
+  }, [allDiscussions, allContacts, groups, filter]);
+  // The contacts whose invitation to the pair's chat waits (§5.12).
+  const me = useAccountStore(s => s.userProfile?.userId);
+  const chatInvitationFrom = React.useMemo(
+    () =>
+      new Set(
+        invitations
+          .filter(i => isDirectChatInvitationFrom(i, i.owner, me))
+          .map(i => i.owner)
+      ),
+    [invitations, me]
+  );
+  const migrationOf = React.useMemo(
+    () =>
+      new Map(
+        invitations
+          .filter(i => i.migrationOf && !i.continues)
+          .map(i => [i.migrationOf as string, i])
+      ),
+    [invitations]
+  );
   const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
 
   // Discussion actions
@@ -126,7 +185,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     lastMessages,
     activeUserId,
     isSearching,
-    filter
+    filter === 'archived' ? 'all' : filter
   );
 
   // Check for empty state
@@ -172,6 +231,61 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip, patchDiscussion, t]
   );
 
+  // The same as the archive's footer (`ArchiveFooter`): nothing is sent.
+  const handleToggleArchived = useCallback(
+    async (discussion: Discussion) => {
+      const archived = !discussion.archived;
+      try {
+        await gossip.conversations.setArchived(
+          discussion.contactUserId,
+          archived
+        );
+        toast.success(
+          archived
+            ? t('groups:archive.archived')
+            : t('groups:archive.unarchived')
+        );
+      } catch {
+        toast.error(t('groups:details.failed'));
+      }
+    },
+    [gossip, t]
+  );
+
+  // The peer's migration, answered from the archive's row (§5.12).
+  const navigate = useNavigate();
+  const refreshGroups = useGroupStore(s => s.refresh);
+  const acceptMigration = useCallback(
+    async (inv: GroupInvitation) => {
+      try {
+        const groupId = await gossip.conversations.acceptInvitation(
+          inv.epochId
+        );
+        await refreshGroups();
+        navigate(ROUTES.group({ groupId }));
+      } catch {
+        toast.error(t('groups:invitation.failed'));
+      }
+    },
+    [gossip, refreshGroups, navigate, t]
+  );
+  const declineMigration = useCallback(
+    async (inv: GroupInvitation, choice: LeaveChoice) => {
+      try {
+        await gossip.conversations.declineInvitation(inv.epochId, choice);
+        await refreshGroups();
+      } catch {
+        toast.error(t('groups:invitation.failed'));
+      }
+    },
+    [gossip, refreshGroups, t]
+  );
+  const openInvitation = useCallback(
+    (d: Discussion) =>
+      navigate(ROUTES.invitation({ kind: 'contact', id: d.contactUserId })),
+    [navigate]
+  );
+
   // Item renderer
   const renderItem = useCallback(
     (item: (typeof virtualItems)[number]) => {
@@ -188,12 +302,22 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
               <DiscussionListItem
                 discussion={item.discussion}
                 contact={item.contact}
+                migrationInvitation={migrationOf.get(
+                  item.discussion.contactUserId
+                )}
+                chatInvitation={chatInvitationFrom.has(
+                  item.discussion.contactUserId
+                )}
+                onAcceptMigration={acceptMigration}
+                onDeclineMigration={declineMigration}
+                onOpenInvitation={openInvitation}
                 lastMessage={item.lastMessage}
                 onSelect={handleSelect}
                 onAccept={handleAcceptDiscussionRequest}
                 onRefuse={handleRefuseDiscussionRequest}
                 onEditName={handleEditName}
                 onTogglePin={handleTogglePin}
+                onToggleArchived={handleToggleArchived}
               />
             </div>
           );
@@ -209,11 +333,25 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       handleRefuseDiscussionRequest,
       handleEditName,
       handleTogglePin,
+      handleToggleArchived,
+      migrationOf,
+      chatInvitationFrom,
+      acceptMigration,
+      declineMigration,
+      openInvitation,
     ]
   );
 
   // Empty states
   if (hasNoResults) {
+    if (filter === 'archived') {
+      if (!showEmpty) return null;
+      return (
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">{t('archived.empty')}</p>
+        </div>
+      );
+    }
     if (isSearching) {
       return (
         <div className="py-8 text-center">

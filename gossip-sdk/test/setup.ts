@@ -25,8 +25,8 @@ const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
 const waSqliteWasm = readFileSync(resolve(waSqlitePath, 'dist/wa-sqlite.wasm'));
 
 if (typeof process !== 'undefined') {
-  process.env.GOSSIP_API_URL = 'https://api.usegossip.com';
-  process.env.VITE_GOSSIP_API_URL = 'https://api.usegossip.com';
+  process.env.GOSSIP_API_URL = 'https://api.usegossip.com/v2';
+  process.env.VITE_GOSSIP_API_URL = 'https://api.usegossip.com/v2';
 }
 
 beforeAll(async () => {

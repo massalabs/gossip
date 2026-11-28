@@ -7,7 +7,6 @@ import {
   UserProfile,
   SecureStorageRecoveryRequiredError,
   MessagingSessionRecoveryRequiredError,
-  SELF_CONTACT_ID,
   UnreadableMessagingSessionError,
 } from '@massalabs/gossip-sdk';
 
@@ -16,6 +15,12 @@ import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
+import { wipeMesh } from '../services/meshNode';
+import {
+  admitAccountOutputs,
+  clearAccountTraces,
+} from '../services/accountTraces';
+import { SECURE_STORAGE_ENABLED } from '../config/features';
 
 import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
@@ -29,6 +34,7 @@ import {
 } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
+import { useGroupStore } from './groupStore';
 import { useSelfMessageStore } from './selfMessageStore';
 import {
   deriveAccountFromMnemonic,
@@ -36,6 +42,8 @@ import {
   wipeAccountPrivateKey,
 } from './utils/accountHelpers';
 import { registerAccountStoreSubscriptions } from './accountStore.subscriptions';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields } from '@massalabs/gossip-sdk/utils/debugFields.js';
 
 export type PrivateMigrationPhase = 1 | 2 | 3 | 4 | 5;
 
@@ -44,12 +52,35 @@ export type LoginMethod = {
   password: string;
   userId?: string;
   resetMessagingSessions?: boolean;
+  /**
+   * Only for the automatic login that immediately follows creating this
+   * account in this app run. Carries what creation already proved and
+   * derived, so login does not derive the password key again, and marks the
+   * account as having nothing to carry over from an older generation.
+   * `loadAccount` takes ownership of `encryptionKey`.
+   */
+  fresh?: { mnemonic: string; encryptionKey: EncryptionKey };
 };
 
 export interface PreparedOnboardingAccount {
   username: string;
   password: string;
-  prepared: PreparedPasswordAccount;
+  /**
+   * The prepared account, or a function that prepares it. A function is
+   * invoked once the account's storage slot is being allocated, so its
+   * cryptography overlaps with the native storage work instead of preceding
+   * it; `mnemonic` must then be supplied here.
+   */
+  prepared: PreparedPasswordAccount | (() => Promise<PreparedPasswordAccount>);
+  mnemonic?: string;
+}
+
+/** An onboarding generation built in memory, not yet durable. */
+export interface OnboardingCandidateHandle {
+  /** Make every account in the candidate durable, atomically. */
+  commit: () => Promise<void>;
+  /** Discard the candidate. Nothing durable has changed. */
+  abort: () => Promise<void>;
 }
 
 export class IncompleteOnboardingSlotCleanupError extends Error {
@@ -76,13 +107,34 @@ interface AccountState {
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
   privateMigrationPhase: PrivateMigrationPhase | null;
+  /**
+   * The account's messaging sessions were given up at this unlock or an
+   * earlier one (it was restored from a backup), and the user was not told
+   * yet. Held in the account's encrypted storage only.
+   */
+  sessionsResetNotice: boolean;
+  /** The user was told: the mark is cleared in the account. */
+  acknowledgeSessionsResetNotice: () => Promise<void>;
   lockedByUser: boolean;
   account: Account | null;
   evmAddress: string | null;
   provider: Provider | null;
   initializeAccount: (username: string, password: string) => Promise<void>;
+  buildOnboardingCandidate: (
+    accounts: readonly PreparedOnboardingAccount[]
+  ) => Promise<OnboardingCandidateHandle>;
   initializePreparedAccountsAtomically: (
     accounts: readonly PreparedOnboardingAccount[]
+  ) => Promise<void>;
+  /**
+   * Fill the empty account that an active rekey candidate created for
+   * `password`, exactly as onboarding fills a new account, then lock it and
+   * leave no account state in memory. Nothing is durable until the rekey
+   * commits.
+   */
+  createAccountInRekeyCandidate: (
+    username: string,
+    password: string
   ) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
@@ -174,6 +226,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       provider: null,
       isLoading: false,
       privateMigrationPhase: null,
+      sessionsResetNotice: false,
     };
   };
 
@@ -210,9 +263,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     mnemonic: string;
     password: string;
     skipHistorical?: boolean;
-    prepared?: PreparedPasswordAccount;
+    prepared?:
+      | PreparedPasswordAccount
+      | (() => Promise<PreparedPasswordAccount>);
     publishPublicKey?: boolean;
     deferExternalSideEffects?: boolean;
+    /**
+     * Secure storage only: the slot already exists, empty, under `password`
+     * (created by a rekey candidate). Unlock it instead of picking and
+     * creating a slot. The caller owns cleanup on failure.
+     */
+    slotAlreadyCreated?: boolean;
   }
 
   const setupAccount = async ({
@@ -223,7 +284,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     prepared,
     publishPublicKey = true,
     deferExternalSideEffects = false,
+    slotAlreadyCreated = false,
   }: SetupAccountParams): Promise<void> => {
+    // Test build, fresh accounts: the phrase and password are recorded as
+    // secrets on purpose (user's decision), never sent without the tick box.
+    dlog(
+      'app',
+      'onboarding.setup',
+      {
+        skipHistorical,
+        prepared: prepared !== undefined,
+        publishPublicKey,
+        deferExternalSideEffects,
+        slotAlreadyCreated,
+      },
+      { lvl: 'info', c: { username }, s: { mnemonic, password } }
+    );
     await cleanupSession();
 
     const sdk = getSdk();
@@ -231,30 +307,72 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       throw new Error('Password is required');
     }
 
-    let encryptionKey: EncryptionKey;
-    let security: UserProfile['security'];
-    if (prepared) {
+    // Requested now, consumed when the account exists: the round trip
+    // overlaps with everything below instead of being waited for.
+    const bulletinCounter = skipHistorical
+      ? sdk.prefetchBulletinCounter()
+      : undefined;
+
+    interface AccountMaterial {
+      encryptionKey: EncryptionKey;
+      security: UserProfile['security'];
+      encryptedSession?: Uint8Array;
+    }
+    const resolveMaterial = async (): Promise<AccountMaterial> => {
+      if (!prepared) {
+        const created = await createPasswordSecurity(mnemonic, password);
+        return {
+          encryptionKey: created.encryptionKey,
+          security: created.security,
+        };
+      }
+      const resolved =
+        typeof prepared === 'function' ? await prepared() : prepared;
+      if (new TextDecoder().decode(resolved.mnemonicBytes) !== mnemonic) {
+        throw new Error('Prepared account identity mismatch');
+      }
+      if (resolved.encryptionKey) {
+        // Preparation already proved this password decrypts this identity
+        // and kept the key it derived; take it instead of deriving again.
+        const encryptionKey = resolved.encryptionKey;
+        resolved.encryptionKey = undefined;
+        return {
+          encryptionKey,
+          security: resolved.security,
+          encryptedSession: resolved.encryptedSession,
+        };
+      }
       const recovered = await auth(
-        { security: prepared.security } as UserProfile,
+        { security: resolved.security } as UserProfile,
         password
       );
       if (recovered.mnemonic !== mnemonic) {
         freeEncryptionKey(recovered.encryptionKey);
         throw new Error('Prepared account identity mismatch');
       }
-      encryptionKey = recovered.encryptionKey;
-      security = prepared.security;
-    } else {
-      ({ encryptionKey, security } = await createPasswordSecurity(
-        mnemonic,
-        password
-      ));
-    }
+      return {
+        encryptionKey: recovered.encryptionKey,
+        security: resolved.security,
+        encryptedSession: resolved.encryptedSession,
+      };
+    };
+    let materialPromise: Promise<AccountMaterial> | null = null;
+    let material: AccountMaterial | null = null;
+    const discardMaterial = async (): Promise<void> => {
+      const pending = materialPromise;
+      materialPromise = null;
+      const owned =
+        material ?? (pending ? await pending.catch(() => null) : null);
+      material = null;
+      if (owned) freeEncryptionKey(owned.encryptionKey);
+    };
 
     // Passwords must identify exactly one account because the global biometric
     // credential deliberately stores no profile ID. Secure storage checks this
     // by probing slots below; classic storage checks existing profiles here.
     if (!sdk.isSecureStorage) {
+      material = await resolveMaterial();
+      const encryptionKey = material.encryptionKey;
       let profiles: UserProfile[];
       try {
         profiles = await sdk.profiles.getAll();
@@ -288,14 +406,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     let allocatedSlot: number | null = null;
 
+    if (slotAlreadyCreated) {
+      if (!sdk.isSecureStorage) {
+        throw new Error('An existing slot needs secure storage');
+      }
+      if (!(await sdk.secureStorageUnlock(password))) {
+        throw new Error('The new account does not open with its password');
+      }
+    }
+
     // Secure-storage mode: create the slot with the user's password before
     // any DB access. Queries created by openSession need the backend unlocked.
-    if (sdk.isSecureStorage) {
+    if (sdk.isSecureStorage && !slotAlreadyCreated) {
       if (
         sdk.storageState !== 'empty' &&
         !useAppStore.getState().secureAccountCreationAllowed
       ) {
-        freeEncryptionKey(encryptionKey);
         throw new Error('Secure account creation is not currently authorized');
       }
       const secret = password;
@@ -306,21 +432,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // other becomes effectively unreachable. `storageState === 'empty'`
       // means no slot has ever been allocated, so the check is moot.
       if (sdk.storageState === 'locked') {
-        let collides: boolean;
-        try {
-          collides = await sdk.secureStorageUnlock(secret);
-        } catch (error) {
-          freeEncryptionKey(encryptionKey);
-          throw error;
-        }
+        const collides = await sdk.secureStorageUnlock(secret);
         if (collides) {
-          try {
-            await sdk.secureStorageLock();
-          } finally {
-            // The candidate key is still caller-owned. A rejected re-lock must
-            // not strand it while the existing slot remains retryably unlocked.
-            freeEncryptionKey(encryptionKey);
-          }
+          await sdk.secureStorageLock();
           throw new Error('Password already in use by another account');
         }
         // unlock returned false → state stays 'locked', nothing to undo.
@@ -331,16 +445,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // previously-allocated slot (that would silently overwrite the
       // earlier account). The in-memory `onboardingAllocatedSlots`
       // set guards against that.
-      let slot: number;
-      try {
-        slot = pickFreeSlot();
-      } catch (error) {
-        freeEncryptionKey(encryptionKey);
-        throw error;
-      }
+      const slot = pickFreeSlot();
       allocatedSlot = slot;
+      // The native call is dispatched synchronously here. Slot allocation
+      // and schema setup then run on the storage thread while this thread
+      // prepares the account's keys, instead of one after the other.
+      const creation = sdk.secureStorageCreate(slot, secret);
+      materialPromise = resolveMaterial();
+      materialPromise.catch(() => {});
       try {
-        await sdk.secureStorageCreate(slot, secret);
+        await creation;
         onboardingAllocatedSlots.add(slot);
       } catch (error) {
         let cleanupIncomplete =
@@ -379,7 +493,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
 
-        freeEncryptionKey(encryptionKey);
+        await discardMaterial();
         if (cleanupIncomplete) {
           throw new IncompleteOnboardingSlotCleanupError(error);
         }
@@ -391,6 +505,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     let derivedAccount: Account | undefined;
     let accountTransferred = false;
     try {
+      // Inside the try: a preparation failure must destroy the slot that
+      // was just allocated for this account.
+      material ??= await (materialPromise ?? resolveMaterial());
+      materialPromise = null;
+      const { encryptionKey, security } = material;
       const derived = await deriveAccountFromMnemonic(
         mnemonic,
         security.identityDerivationVersion
@@ -401,7 +520,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       await sdk.openSession({
         mnemonic,
         identityDerivationVersion: security.identityDerivationVersion,
-        encryptedSession: prepared?.encryptedSession,
+        encryptedSession: material.encryptedSession,
         encryptionKey,
         onPersist: createOnPersist(userId),
         // Don't poll during onboarding — we may open the session just to
@@ -429,7 +548,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const accountSettings = await sdk.queries.accountSettings.create(userId);
 
       if (skipHistorical) {
-        await getSdk().announcements.skipHistorical();
+        await getSdk().announcements.skipHistorical(bulletinCounter);
       }
 
       useAppStore.getState().hydrateAccountSettings(accountSettings);
@@ -462,7 +581,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           logger.error('Failed to close partial account session:', closeError);
         }
       } else if (!sessionOpened) {
-        freeEncryptionKey(encryptionKey);
+        await discardMaterial();
       }
 
       if (allocatedSlot !== null && sessionClosed) {
@@ -509,6 +628,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     encryptionKey: null,
     isLoading: true,
     privateMigrationPhase: null,
+    sessionsResetNotice: false,
     lockedByUser: false,
     account: null,
     evmAddress: null,
@@ -532,13 +652,47 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    initializePreparedAccountsAtomically: async accounts => {
+    buildOnboardingCandidate: async accounts => {
       const sdk = getSdk();
+      // Building an account briefly publishes its profile, which makes the
+      // discussion and message stores initialise against a session that is
+      // closed again moments later. They only initialise once, so they must
+      // be reset here or the login that follows shows an empty list.
+      const resetTransientAccountStores = (): void => {
+        useDiscussionStore.getState().cleanup();
+        useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
+      };
       if (!sdk.isSecureStorage || accounts.length === 0) {
         throw new Error('Atomic onboarding requires secure account data');
       }
 
       let candidateActive = false;
+      let settled = false;
+      const discard = async (): Promise<void> => {
+        try {
+          await cleanupSession();
+        } catch (cleanupError) {
+          logger.error(
+            'Failed to close onboarding candidate session:',
+            cleanupError
+          );
+        }
+        if (candidateActive) {
+          candidateActive = false;
+          try {
+            await sdk.secureStorageAbortOnboardingCandidate();
+          } catch (abortError) {
+            logger.error('Failed to discard onboarding candidate:', abortError);
+          }
+        }
+        onboardingAllocatedSlots.clear();
+        resetTransientAccountStores();
+        useAppStore.getState().resetAccountSettings();
+        set({ ...clearAccountState(), isLoading: false });
+      };
+
       try {
         set({ isLoading: true });
         onboardingAllocatedSlots.clear();
@@ -546,9 +700,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         candidateActive = true;
 
         for (const account of accounts) {
-          const mnemonic = new TextDecoder().decode(
-            account.prepared.mnemonicBytes
-          );
+          const mnemonic =
+            typeof account.prepared === 'function'
+              ? account.mnemonic
+              : new TextDecoder().decode(account.prepared.mnemonicBytes);
+          if (!mnemonic) {
+            throw new Error('Lazily prepared account needs its mnemonic');
+          }
           await setupAccount({
             username: account.username,
             mnemonic,
@@ -560,42 +718,84 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           });
           await cleanupSession();
         }
-
-        await sdk.secureStorageCommitOnboardingCandidate();
-        candidateActive = false;
-        finalizeCommittedAccountGenerationAuthority();
-        onboardingAllocatedSlots.clear();
-        useAppStore.getState().resetAccountSettings();
-        set(clearAccountState());
       } catch (error) {
-        try {
-          await cleanupSession();
-        } catch (cleanupError) {
-          logger.error(
-            'Failed to close onboarding candidate session:',
-            cleanupError
-          );
-        }
-        if (candidateActive) {
+        settled = true;
+        await discard();
+        throw error;
+      }
+
+      return {
+        commit: async () => {
+          if (settled) throw new Error('Onboarding candidate is settled');
+          settled = true;
           try {
-            await sdk.secureStorageAbortOnboardingCandidate();
-          } catch (abortError) {
-            logger.error('Failed to discard onboarding candidate:', abortError);
+            await sdk.secureStorageCommitOnboardingCandidate();
+            candidateActive = false;
+            finalizeCommittedAccountGenerationAuthority();
+            onboardingAllocatedSlots.clear();
+            resetTransientAccountStores();
+            useAppStore.getState().resetAccountSettings();
+            set(clearAccountState());
+          } catch (error) {
+            await discard();
+            throw error;
           }
-        }
-        onboardingAllocatedSlots.clear();
+        },
+        abort: async () => {
+          if (settled) return;
+          settled = true;
+          await discard();
+        },
+      };
+    },
+
+    initializePreparedAccountsAtomically: async accounts => {
+      const candidate = await get().buildOnboardingCandidate(accounts);
+      await candidate.commit();
+    },
+
+    createAccountInRekeyCandidate: async (username, password) => {
+      try {
+        await setupAccount({
+          username,
+          mnemonic: generateMnemonic(256),
+          password,
+          skipHistorical: true,
+          // Published at the account's first login, as for accounts created
+          // by the multi-account onboarding.
+          publishPublicKey: false,
+          deferExternalSideEffects: true,
+          slotAlreadyCreated: true,
+        });
+      } finally {
+        await cleanupSession();
+        // Filling the account briefly published its profile to the stores.
+        useDiscussionStore.getState().cleanup();
+        useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
         useAppStore.getState().resetAccountSettings();
         set({ ...clearAccountState(), isLoading: false });
-        throw error;
       }
     },
 
     loadAccount: async (method: LoginMethod) => {
+      const loginStarted = performance.now();
+      dlog(
+        'app',
+        'login.start',
+        {
+          type: method.type,
+          resetMessagingSessions: !!method.resetMessagingSessions,
+        },
+        { lvl: 'info', s: { password: method.password } }
+      );
       let unlockedThisCall = false;
       let callerOwnedEncryptionKey: EncryptionKey | null = null;
       let derivedAccount: Account | null = null;
       let accountTransferred = false;
       let sessionOpenedThisCall = false;
+      let freshKeyTaken = false;
       try {
         set({ isLoading: true });
 
@@ -629,9 +829,23 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         ) {
           throw new Error('Account generation epoch is unavailable');
         }
-        let migrationState = migrationEpoch
-          ? await sdk.queries.privateMigration.begin(migrationEpoch)
-          : null;
+        // An account this app run just created has nothing to carry over
+        // from an older generation: its journal is complete by construction.
+        // Record that once, after the user is in (see the end of this
+        // function), instead of walking six transactions now. If the write
+        // never lands, the next login simply walks the journal as usual.
+        const freshAccount =
+          method.fresh !== undefined && migrationEpoch !== null;
+        let migrationState = freshAccount
+          ? {
+              formatVersion: 1 as const,
+              installationEpoch: migrationEpoch,
+              completedPhase: 5,
+              sessionReset: false,
+            }
+          : migrationEpoch
+            ? await sdk.queries.privateMigration.begin(migrationEpoch)
+            : null;
         const migrationActive =
           migrationState !== null && migrationState.completedPhase < 5;
         const messagingResetAuthorizedAtStart =
@@ -687,6 +901,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (!profile) {
           throw new Error('No user profile found for this password');
         }
+        if (method.fresh && !authResult) {
+          authResult = method.fresh;
+          freshKeyTaken = true;
+        }
         authResult ??= await auth(profile, method.password);
         const { mnemonic, encryptionKey } = authResult;
         callerOwnedEncryptionKey = encryptionKey;
@@ -728,11 +946,33 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           );
         }
 
+        // An account whose journal came from another generation (a backup
+        // imported) gives up its sessions at the unlock that carries the
+        // journal over, without asking: the copy's sessions may have moved on
+        // elsewhere, and their next seekers be already used, so what it sent
+        // on them would be refused. Only the contact requests still waiting
+        // for this user's answer are kept. Nothing is sent before the new
+        // state is persisted and the journal moves on (polling starts after
+        // the last phase); a crash before that resets again.
+        const resetForImport =
+          sessionMigrationPending &&
+          migrationState?.sessionReset === true &&
+          !method.resetMessagingSessions &&
+          sdk.usesSessionBlobNamespace;
+        const resetSessions =
+          method.resetMessagingSessions === true || resetForImport;
+
         let encryptedSession: Uint8Array | undefined;
         let usedLegacySessionFallback = false;
         if (sdk.usesSessionBlobNamespace) {
           if (method.resetMessagingSessions) {
             await sdk.queries.messagingSessionRecovery.prepareReset();
+          } else if (resetForImport) {
+            await sdk.queries.messagingSessionRecovery.prepareReset();
+            // Read only for the requests it holds; everything else in it is
+            // given up as it is loaded.
+            const ns = await sdk.readSessionBlob();
+            encryptedSession = ns && ns.length > 0 ? ns : undefined;
           } else {
             const ns = await sdk.readSessionBlob();
             if (!ns || ns.length === 0) {
@@ -755,14 +995,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               : undefined;
         }
 
+        // Background sync and notifications for this account, only once the
+        // traces of the last lock are gone.
+        await admitAccountOutputs(sdk);
         const persistOpenedSession = createOnPersist(profile.userId);
-        let sessionPersistenceEnabled = !method.resetMessagingSessions;
-        try {
-          await sdk.openSession({
+        let sessionPersistenceEnabled = !resetSessions;
+        const open = (session: Uint8Array | undefined) =>
+          sdk.openSession({
             mnemonic,
             identityDerivationVersion:
               profile.security.identityDerivationVersion,
-            encryptedSession,
+            encryptedSession: session,
             encryptionKey,
             onPersist: async (blob, key) => {
               if (sessionPersistenceEnabled) {
@@ -772,7 +1015,23 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             // Start only after the migration journal and lastSeen save commit.
             publishPublicKey: false,
             autoStartPolling: migrationActive ? false : undefined,
+            ...(resetForImport ? { sessionReset: true } : {}),
           });
+        try {
+          try {
+            await open(encryptedSession);
+          } catch (error) {
+            // A copy whose sessions cannot be read keeps no request: all of
+            // them are given up anyway.
+            if (
+              !resetForImport ||
+              encryptedSession === undefined ||
+              !(error instanceof UnreadableMessagingSessionError)
+            ) {
+              throw error;
+            }
+            await open(undefined);
+          }
         } catch (error) {
           if (
             sessionMigrationPending &&
@@ -785,24 +1044,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
         sessionOpenedThisCall = true;
 
-        if (method.resetMessagingSessions) {
-          const discussions = await sdk.queries.discussions.getByOwner(
-            profile.userId
-          );
-          for (const discussion of discussions) {
-            if (
-              !discussion.weAccepted ||
-              discussion.contactUserId === SELF_CONTACT_ID
-            ) {
-              continue;
-            }
-            const reopened = await sdk.discussions.createSessionForContact(
-              discussion.contactUserId,
-              new Uint8Array(0),
-              { resetQueue: false, triggerRefresh: false }
-            );
-            if (!reopened.success) throw reopened.error;
-          }
+        if (resetSessions) {
+          // One new session, with a new announcement, per contact and
+          // automatic connection; sent once polling starts.
+          await sdk.rebuildMessagingSessions();
           await sdk.persistSessionBlob(sdk.getEncryptedSession());
           sessionPersistenceEnabled = true;
         } else if (migrationActive && usedLegacySessionFallback) {
@@ -814,16 +1059,28 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (migrationActive) await completeMigrationPhase(4);
         callerOwnedEncryptionKey = null;
 
-        const lastSeen = new Date();
-        const updatedProfile = {
-          ...profile,
-          session: migrationState ? new Uint8Array(0) : profile.session,
-          lastSeen,
-        };
-        await getSdk().profiles.save(updatedProfile);
+        // Creation wrote this profile, with its last-seen time, moments ago.
+        const updatedProfile = freshAccount
+          ? profile
+          : {
+              ...profile,
+              session: migrationState ? new Uint8Array(0) : profile.session,
+              lastSeen: new Date(),
+            };
+        if (!freshAccount) await getSdk().profiles.save(updatedProfile);
         if (migrationActive) await completeMigrationPhase(5);
         sdk.startPublicKeyPublication();
         if (migrationActive) sdk.polling.start();
+        if (freshAccount && migrationEpoch) {
+          // Awaited: a journal never recorded would leave a backup of this
+          // account unable to tell, once imported, that its sessions are to
+          // be given up.
+          try {
+            await sdk.queries.privateMigration.beginCompleted(migrationEpoch);
+          } catch (error) {
+            logger.error('Failed to record the completed journal:', error);
+          }
+        }
 
         useAppStore.getState().setIsInitialized(true);
         wipeAccountPrivateKey(get().account);
@@ -835,6 +1092,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           encryptionKey,
           isLoading: false,
           lockedByUser: false,
+          sessionsResetNotice: migrationState?.sessionReset === true,
         });
         accountTransferred = true;
 
@@ -852,6 +1110,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           callerOwnedEncryptionKey = null;
         }
         if (!accountTransferred) wipeAccountPrivateKey(derivedAccount);
+        // `fresh.encryptionKey` is ours from the moment of the call.
+        if (method.fresh && !freshKeyTaken) {
+          freeEncryptionKey(method.fresh.encryptionKey);
+        }
 
         // If we unlocked the slot during this call but failed before
         // openSession, re-lock so the next attempt re-probes from
@@ -876,14 +1138,36 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
         logger.error('Error loading account:', error);
+        dlog(
+          'app',
+          'login.failed',
+          { unlockedThisCall, sessionOpenedThisCall, ...errFields(error) },
+          { lvl: 'error', dur: performance.now() - loginStarted }
+        );
         set({ isLoading: false, privateMigrationPhase: null });
         throw error;
+      }
+    },
+
+    acknowledgeSessionsResetNotice: async () => {
+      set({ sessionsResetNotice: false });
+      const sdk = getSdk();
+      const epoch = sdk.accountGenerationEpoch;
+      if (!epoch) return;
+      try {
+        await sdk.queries.privateMigration.acknowledgeSessionReset(epoch);
+      } catch (error) {
+        // Told again at the next unlock.
+        logger.error('Failed to clear the session reset notice:', error);
       }
     },
 
     resetAccount: async () => {
       set({ isLoading: true });
       try {
+        // before the reset, which reloads the app; throws, and stops the
+        // reset, when the mesh node could not be emptied
+        await wipeMesh();
         await resetAllAccountStorage();
       } catch (error) {
         logger.error('Error resetting all accounts:', error);
@@ -897,8 +1181,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         await cleanupSession();
+        // Locked means nothing of the account is left outside the encrypted
+        // store. Not awaited: on native it may wait for a background sync to
+        // finish; the next login waits for it instead.
+        if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
         useAppStore.getState().resetAccountSettings();

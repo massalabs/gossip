@@ -15,6 +15,8 @@ import { logSyncDiagnostics } from '../utils/syncDiagnostics';
 import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
 import { networkObserverService } from './networkObserver';
+import { logPermission } from '../utils/debugPermissions';
+import { syncNotificationDependents } from './notificationDependents';
 
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
@@ -134,20 +136,20 @@ async function initializeBackgroundSync(): Promise<void> {
     // The background runner can't access import.meta.env, so we persist it via Preferences
     await setApiBaseUrlForBackgroundSync(protocolConfig.baseUrl);
     await syncBackgroundSyncPresetToRunner();
+    // Notifications off: stop what exists only to notify (also repairs a
+    // "Keep sync active" left running by an older version).
+    await syncNotificationDependents().catch(error => {
+      logger.error('[App] Failed to apply the notifications switch:', error);
+    });
     logSyncDiagnostics('Background sync preferences initialized', {
       baseUrl: protocolConfig.baseUrl,
     });
 
-    // Sync notification permission state
-    if (Capacitor.isNativePlatform()) {
-      // Native: Capacitor permission flow (no user-gesture requirement)
-      await notificationService.requestPermission();
-    } else {
-      // Web: never prompt without a user gesture (Firefox auto-denies such
-      // requests). Only refresh the current permission state; the actual
-      // request happens from a user interaction in the UI.
-      notificationService.getPermissionStatus();
-    }
+    // Sync notification permission state without prompting. The native
+    // permission dialog is raised once the user has a first conversation
+    // (see useNotificationPermissionPrompt) or from Settings; on web the
+    // request needs a user gesture (Firefox auto-denies otherwise).
+    notificationService.getPermissionStatus();
 
     // Register periodic background sync (Web API - optional, expected to fail on mobile)
     // This is wrapped in its own try-catch because failures are expected and non-critical
@@ -241,6 +243,11 @@ async function registerPeriodicSync(): Promise<void> {
         permissionStatus = await (navigator as any).permissions.query({
           name: 'periodic-background-sync',
         });
+        logPermission(
+          'permission.check',
+          'periodic-background-sync',
+          permissionStatus?.state
+        );
       } catch {
         // Permission query not supported - expected on most browsers
         return;

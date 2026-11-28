@@ -28,9 +28,8 @@ const ACCOUNT_CLEANUP_BLOCK_KEY = 'gossip-account-cleanup-blocked-v1';
 const ACCOUNT_OUTPUT_GENERATION_KEY = 'gossip-account-output-generation-v1';
 // Must match BACKGROUND_SYNC_PRESET_KV_KEY in src/utils/preferences.ts
 const SYNC_PRESET_KEY = 'gossip-sync-preset';
-
-// Fallback API URL if not stored in preferences
-const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
+// Must match NOTIFICATIONS_ENABLED_RUNNER_KEY in src/services/notificationDependents.ts
+const NOTIFICATIONS_ENABLED_KEY = 'gossip-notifications-enabled';
 
 // Minimum interval between syncs — depends on user preset (read from KV)
 const MIN_SYNC_INTERVAL_MAX_MS = 1 * 60 * 1000; // 1 minute — max reactivity
@@ -101,7 +100,8 @@ function extractKVValue(rawValue) {
 }
 
 /**
- * Retrieve the API base URL from BackgroundRunner storage or use default.
+ * Retrieve the API base URL the app stored in BackgroundRunner storage.
+ * Returns null when none is stored: the runner then contacts no host.
  */
 async function getApiBaseUrl() {
   try {
@@ -118,7 +118,7 @@ async function getApiBaseUrl() {
       String(err)
     );
   }
-  return DEFAULT_API_BASE_URL;
+  return null;
 }
 
 /**
@@ -397,6 +397,23 @@ async function releaseSyncLock(token) {
   }
 }
 
+/**
+ * This runner fetches only to show a notification: it stores no message.
+ * With notifications turned off in the app it has nothing to do, so it sends
+ * nothing. A missing value means on (the app default).
+ */
+async function areNotificationsEnabled() {
+  if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) return true;
+  try {
+    const value = extractKVValue(
+      await CapacitorKV.get(NOTIFICATIONS_ENABLED_KEY)
+    );
+    return value !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 let syncExecutionTail = Promise.resolve();
 
 addEventListener('backgroundSync', async (resolve, reject, args) => {
@@ -411,6 +428,11 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
   let lockHeartbeat = null;
   let lockHeartbeatTask = Promise.resolve();
   try {
+    if (!(await areNotificationsEnabled())) {
+      resolve();
+      return;
+    }
+
     // Acquire sync lock first to prevent concurrent executions
     lockToken = await acquireSyncLock();
     if (!lockToken) {
@@ -468,6 +490,11 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
 
     // Get API base URL
     const apiBaseUrl = await getApiBaseUrl();
+    if (!apiBaseUrl) {
+      logDebug('[BackgroundSync] No API URL stored, skipping sync');
+      resolve();
+      return;
+    }
 
     // Fetch messages from the protocol API
     let messages = [];

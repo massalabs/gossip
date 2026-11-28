@@ -12,7 +12,6 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
-import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -162,15 +161,15 @@ public class GossipForegroundSyncService extends Service {
             if (exact) {
                 am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
             } else {
-                Log.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)");
+                DebugLog.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)");
                 am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
             }
         } catch (SecurityException e) {
-            Log.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)", e);
+            DebugLog.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)", e);
             try {
                 am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
             } catch (Exception ignored) {
-                Log.e(TAG, "Failed to schedule any alarm — sync tick disabled until next service start");
+                DebugLog.e(TAG, "Failed to schedule any alarm — sync tick disabled until next service start");
             }
         }
     }

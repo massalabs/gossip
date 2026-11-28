@@ -1,10 +1,15 @@
 import { logger } from '../utils/logger.ts';
 import { useCallback, useRef, useState } from 'react';
-import { validateUserIdFormat, UserPublicKeys } from '@massalabs/gossip-sdk';
+import {
+  canonicalUserId,
+  validateUserIdFormat,
+  UserPublicKeys,
+} from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useGossipSdk } from './useGossipSdk';
 import { mnsService, isMnsDomain } from '../services/mns';
+import { isConnectedNonContact } from '../utils/conversations';
 
 export type FieldState = {
   value: string;
@@ -25,6 +30,10 @@ export type MnsState = {
  * Turns raw user-ID input into a resolved gossip ID plus its public keys:
  * validates the format, resolves MNS domains (name.massa) when enabled,
  * fetches/caches the public keys and rejects IDs already in contacts.
+ *
+ * A member of a shared chat who is no contact (a hidden automatic
+ * connection, §5.12) is not refused: `connectedNonContact` says so, and
+ * adding them is local and sends nothing.
  */
 export function useUserIdResolution() {
   const gossip = useGossipSdk();
@@ -42,6 +51,7 @@ export function useUserIdResolution() {
   });
 
   const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
+  const [connectedNonContact, setConnectedNonContact] = useState(false);
 
   const [mnsState, setMnsState] = useState<MnsState>({
     isResolving: false,
@@ -62,6 +72,7 @@ export function useUserIdResolution() {
         throw new Error('SDK not initialized');
       }
 
+      // without internet, keys come from the in-person contact code instead
       const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
       publicKeysCache.current.set(uid, publicKey);
       return publicKey;
@@ -81,12 +92,9 @@ export function useUserIdResolution() {
   const fetchAndValidateId = useCallback(
     async (id: string, seq: number) => {
       try {
-        const publicKey = await getPublicKey(id);
-        if (seq !== requestSeqRef.current) return;
-
         const existing = await gossip.contacts.get(id);
         if (seq !== requestSeqRef.current) return;
-        if (existing) {
+        if (existing && !isConnectedNonContact(existing)) {
           setUserId(prev => ({
             ...prev,
             error: 'This user is already in your contacts',
@@ -94,6 +102,13 @@ export function useUserIdResolution() {
           }));
           return;
         }
+        // A member of a shared chat: its keys are held already, and the
+        // backend is not asked about someone this device is connected to.
+        const publicKey = existing
+          ? UserPublicKeys.from_bytes(existing.publicKeys)
+          : await getPublicKey(id);
+        if (seq !== requestSeqRef.current) return;
+        setConnectedNonContact(!!existing);
 
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
@@ -116,6 +131,7 @@ export function useUserIdResolution() {
       const seq = ++requestSeqRef.current;
 
       setPublicKeys(null);
+      setConnectedNonContact(false);
       setUserId(prev => ({ ...prev, value: trimmed }));
       setMnsState({
         isResolving: false,
@@ -181,23 +197,26 @@ export function useUserIdResolution() {
       }
 
       // Not an MNS domain - handle as regular gossip ID
+      const result = validateUserIdFormat(trimmed);
+      // The same id can be typed in lowercase or in uppercase. One spelling
+      // from here on: for the checks below, the field and what is stored.
+      const id = result.valid ? canonicalUserId(trimmed) : trimmed;
+
       // Prevent adding own user ID as a contact
-      if (userProfile?.userId && trimmed === userProfile.userId) {
+      if (userProfile?.userId && id === userProfile.userId) {
         setUserId(_ => ({
-          value: trimmed,
+          value: id,
           error: 'You cannot add yourself as a contact',
           loading: false,
         }));
         return;
       }
 
-      setUserId(prev => ({
-        ...prev,
+      setUserId(_ => ({
+        value: id,
         error: undefined,
         loading: true,
       }));
-
-      const result = validateUserIdFormat(trimmed);
 
       if (!result.valid) {
         setUserId(_ => ({
@@ -210,7 +229,7 @@ export function useUserIdResolution() {
         return;
       }
 
-      await fetchAndValidateId(trimmed, seq);
+      await fetchAndValidateId(id, seq);
     },
     [fetchAndValidateId, userProfile?.userId, mnsEnabled]
   );
@@ -220,6 +239,8 @@ export function useUserIdResolution() {
     setUserId,
     publicKeys,
     setPublicKeys,
+    connectedNonContact,
+    setConnectedNonContact,
     mnsState,
     handleUserIdChange,
     cachePublicKey,

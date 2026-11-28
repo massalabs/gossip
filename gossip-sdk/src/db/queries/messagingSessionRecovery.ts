@@ -3,13 +3,14 @@ import { MessageDirection, MessageStatus } from '../db.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import {
   activeSeekers,
+  groupOutbox,
   messages,
   pendingEncryptedMessages,
 } from '../schema/index.js';
 
 /**
  * Prepare account-local SQL state for an explicitly confirmed loss of the
- * encrypted SessionManager. The transaction preserves readable history,
+ * encrypted SessionManager, or of sessions given up. The transaction preserves readable history,
  * stable message IDs, pending announcements, contacts, and settings.
  */
 export class MessagingSessionRecoveryQueries {
@@ -19,6 +20,9 @@ export class MessagingSessionRecoveryQueries {
     await this.conn.withTransaction(async tx => {
       await tx.delete(activeSeekers);
       await tx.delete(pendingEncryptedMessages);
+      // Group ciphertexts of the sessions given up: the engine keeps the
+      // events and sends their content again on the new sessions.
+      await tx.delete(groupOutbox);
       await tx
         .update(messages)
         .set({

@@ -20,7 +20,9 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     /// `unlockSession`, `lockSession`, `flush`, or `close`.
     private static let worker: WorkerThread = WorkerThread(name: "secure-storage")
 
+    #if DEBUG
     private static let log = OSLog(subsystem: "secureStorage", category: "plugin")
+    #endif
 
     /// Single dispatcher. Every JS call is `{method, args}` where
     /// `args` is a JSON string. Rust does the parsing/encoding.
@@ -39,6 +41,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 args = try Self.resolveInitArgs(rawArgs)
             } catch {
+                DebugLog.e("secureStorage", "initSecureStorage arguments refused", error)
                 call.reject(error.localizedDescription, "INIT_ARGS")
                 return
             }
@@ -47,13 +50,41 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         Self.worker.enqueue {
+            let start = DispatchTime.now()
             do {
                 let result = try nativeCall(method: method, argsJson: args)
+                DebugLog.event("secureStorage", "storage.call", lvl: "debug", dur: DebugLog.ms(since: start), [
+                    "method": method, "argsBytes": args.utf8.count, "resultBytes": result.utf8.count,
+                ])
                 call.resolve(["result": result])
             } catch let SecureStorageException.Error(code, msg) {
+                DebugLog.event("secureStorage", "storage.call", lvl: "error", dur: DebugLog.ms(since: start), [
+                    "method": method, "code": code, "msg": msg, "argsBytes": args.utf8.count,
+                    "s": ["args": String(args.prefix(64 * 1024))],
+                ])
                 call.reject(msg, code)
             } catch {
+                DebugLog.event("secureStorage", "storage.call", lvl: "error", dur: DebugLog.ms(since: start), [
+                    "method": method, "code": "INTERNAL", "msg": String(describing: error),
+                    "s": ["args": String(args.prefix(64 * 1024))],
+                ])
                 call.reject(error.localizedDescription, "INTERNAL")
+            }
+        }
+    }
+
+    /// Locks the unlocked account natively, without the WebView (the native
+    /// auto-lock): the VFS forgets its keys, as when the app locks. Queued
+    /// behind the calls in flight; a locked store stays locked.
+    static func lockNow() {
+        worker.enqueue {
+            do {
+                _ = try nativeCall(method: "lockSession", argsJson: "{}")
+            } catch {
+                DebugLog.e("secureStorage", "native lock failed", error)
+                #if DEBUG
+                os_log("native lock failed: %{public}@", log: Self.log, type: .error, error.localizedDescription)
+                #endif
             }
         }
     }
@@ -72,6 +103,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 call.resolve()
             } catch {
+                DebugLog.e("secureStorage", "secure storage reset failed", error)
                 call.reject("secure storage reset failed", "RESET_FAILED")
             }
         }
@@ -113,9 +145,11 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: fullPath)
         } catch {
+            #if DEBUG
             os_log(
                 "data protection class application failed: %{public}@",
                 log: Self.log, type: .error, error.localizedDescription)
+            #endif
         }
 
         // Backup exclusion: secureStorage must NOT ride iCloud backups.

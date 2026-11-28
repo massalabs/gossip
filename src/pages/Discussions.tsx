@@ -9,6 +9,8 @@ import React, {
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
+import GroupListSection from '../components/groups/GroupListSection';
+import ArchivedChatsRow from '../components/discussions/ArchivedChatsRow';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
@@ -26,10 +28,14 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
+import { useOfflineLabel } from '../hooks/useMeshLinks';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
 import { useUiStore } from '../stores/uiStore';
 import { prewarmShareQR } from '../components/settings/shareContactQrCache';
 import { generateDeepLinkUrl } from '../utils/invite';
+import { useGroupStore } from '../stores/groupStore';
+import { useOpenChat } from '../hooks/useOpenChat';
+import { isConversationRow } from '../utils/conversations';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -53,11 +59,39 @@ const Discussions: React.FC = () => {
   const setPendingForwardMessageId = useAppStore(
     s => s.setPendingForwardMessageId
   );
-  const discussions = useDiscussionStore(s => s.discussions);
+  const allDiscussions = useDiscussionStore(s => s.discussions);
+  const contacts = useDiscussionStore(s => s.contacts);
+  const groups = useGroupStore(s => s.groups);
+  const openChat = useOpenChat();
+  // The discussions shown as conversations (§5.12), outside the archived list.
+  const { discussions, archivedCount, archivedUnread } = useMemo(() => {
+    const held = new Set(groups.map(g => g.summary.groupId));
+    const rows = allDiscussions.filter(d =>
+      isConversationRow(
+        d,
+        contacts.find(c => c.userId === d.contactUserId),
+        held
+      )
+    );
+    // Archived chats stay archived when a message arrives (product owner,
+    // closer to Telegram): the row of the archived list shows a dot instead.
+    const archivedRows = rows.filter(d => d.archived);
+    const archivedGroups = groups.filter(
+      g => g.archived && g.summary.status !== 'dissolved-deleted'
+    );
+    return {
+      discussions: rows.filter(d => !d.archived),
+      archivedCount: archivedRows.length + archivedGroups.length,
+      archivedUnread:
+        archivedRows.some(d => d.unreadCount > 0) ||
+        archivedGroups.some(g => g.unread),
+    };
+  }, [allDiscussions, contacts, groups]);
   const filter = useDiscussionStore(s => s.filter);
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
+  const offline = useOfflineLabel();
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const showBottomNav = useUiStore(s => s.showBottomNav);
   const swipeHandlers = useSwipeFilter(filter, setFilter);
@@ -97,24 +131,23 @@ const Discussions: React.FC = () => {
         }
         return;
       }
+      // The conversation with a contact is its direct chat (§5.12), or its
+      // archive, request or pending request while there is none.
       if (pendingSharedContent) {
         const state =
           pendingForwardMessageId != null
             ? { forwardFromMessageId: pendingForwardMessageId }
             : { prefilledMessage: pendingSharedContent };
-
-        navigate(ROUTES.discussion({ userId: contactUserId }), {
-          state,
-          replace: false,
-        });
+        void openChat(contactUserId, { state, replace: false });
         setPendingSharedContent(null);
         setPendingForwardMessageId(null);
       } else {
-        navigate(ROUTES.discussion({ userId: contactUserId }));
+        void openChat(contactUserId);
       }
     },
     [
       navigate,
+      openChat,
       pendingSharedContent,
       pendingForwardMessageId,
       setPendingSharedContent,
@@ -159,7 +192,11 @@ const Discussions: React.FC = () => {
       );
     }).length;
 
-    return { all: allCount, unread: unreadCount, pending: pendingCount };
+    return {
+      all: allCount,
+      unread: unreadCount,
+      pending: pendingCount,
+    };
   }, [discussions, gossip.isSessionOpen, sessionsStatuses]);
 
   const menuItems: MenuItem[] = useMemo(
@@ -203,8 +240,12 @@ const Discussions: React.FC = () => {
         {isOnline ? (
           <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
         ) : (
-          <h1 className="text-2xl font-bold text-accent-soft-foreground">
-            {t('waiting_connection')}
+          <h1
+            className={`font-bold text-accent-soft-foreground ${
+              offline.mesh ? 'text-lg' : 'text-2xl'
+            }`}
+          >
+            {offline.label}
           </h1>
         )}
       </div>
@@ -273,6 +314,19 @@ const Discussions: React.FC = () => {
       )}
       {/* Swipe left/right to change filter */}
       <div className="flex-1 min-h-0" {...swipeHandlers}>
+        {filter === 'all' && archivedCount > 0 && !searchQuery.trim() && (
+          <ArchivedChatsRow
+            count={archivedCount}
+            unread={archivedUnread}
+            onOpen={() => navigate(ROUTES.archivedChats())}
+          />
+        )}
+        {filter !== 'pending' && (
+          <GroupListSection
+            searchQuery={debouncedSearchQuery}
+            unreadOnly={filter === 'unread'}
+          />
+        )}
         {scrollContainer && (
           <DiscussionListPanel
             onSelect={handleSelectDiscussion}

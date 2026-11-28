@@ -1,0 +1,24 @@
+[package]
+name = "gossip-wire"
+version.workspace = true
+edition = "2021"
+rust-version = "1.98"
+license.workspace = true
+description = "Gossip P2P backend: wire types, ids, canonical encodings and bounded (de)serializers"
+
+[dependencies]
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+massa_serialization = { workspace = true }
+nom = { workspace = true }
+unsigned-varint = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+displaydoc = { workspace = true }
+bs58 = { workspace = true }
+blake3 = { workspace = true }
+ip_rfc = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

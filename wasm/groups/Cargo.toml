@@ -1,0 +1,24 @@
+[package]
+name = "groups"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Plausibly deniable group chats: identifiers, roots, signed objects, message events and wire format (pure logic, no I/O)"
+
+[dependencies]
+auth = { path = "../auth" }
+crypto-dsa = { path = "../crypto-dsa" }
+blake3 = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+# Protobuf (proto3) wire format of the group protocol. The derive macros are
+# used directly on hand-written structs, so no protoc or build script is needed.
+prost = { version = "=0.13.5", default-features = false, features = ["std", "prost-derive"] }
+
+[features]
+# The full debug build of the app: debug events at the engine's decision points (see
+# src/debug.rs). Off in every normal build, where the event macros expand to nothing.
+full-debug = []
+
+[dev-dependencies]
+hex = "0.4"

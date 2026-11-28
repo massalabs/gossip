@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0
+
+### Breaking changes
+
+- Adding a contact no longer creates a chat. A contact request carries no chat
+  and no message timer; either side starts a chat afterwards with
+  `conversations.startDirectChat()`.
+- A contact request is always shown to the other person, whatever their own
+  record of the sender is.
+- A send resolves as soon as the first transport has taken the message. It no
+  longer waits for the backend. A message carried only by the mesh is posted to
+  the backend later.
+- The mesh service UUID carries the mesh version in its last byte. Devices on
+  an earlier build do not join this mesh.
+
+### Added
+
+- `conversations.addAsContact()`: makes a chat member a contact on this device
+  only. Nothing is sent.
+- `conversations.sendContactRequest()`: sends an ordinary contact request to a
+  contact added on this device whose connection has lapsed.
+- `conversations.declineContactRequest()`.
+- `groups.sendMessage()` and `groups.editMessage()` accept an `author`: the
+  message or the edit is published under another member's name, the way a
+  relayed one is.
+- `groups.sendMessageLocally()`: a message on this device only, also in a chat
+  the device can only read.
+- `groups.archived()` and `groups.setArchived()`: a mark on this device only.
+
+See `docs/plausibly-deniable-group-chats.md` for the reasons and the known
+limits.
+
 ## 0.2.0
 
 ### Breaking changes

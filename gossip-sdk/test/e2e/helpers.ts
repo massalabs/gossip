@@ -2,20 +2,34 @@
  * E2E Test Helpers
  *
  * Reusable helpers for SDK end-to-end tests. Every helper uses real network
- * calls — no mocks. Polling is disabled by default (SDK default); tests drive
- * sync manually via fetch() and updateState().
+ * calls — no mocks. Accounts run the SDK's own polling (messages,
+ * announcements, session refresh and session statuses), as the app does:
+ * a chat of two is founded by the SDK once a contact request is accepted,
+ * which needs the session statuses that only polling reports.
  *
  * Usage:
- *   import { createAccount, establishSession, sendAndReceive, cleanup, pollUntil } from './helpers';
+ *   import { createAccount, startChatOfTwo, sendAndReceive, cleanup, pollUntil } from './helpers';
  */
 
 import { GossipSdk } from '../../src/gossip';
-import type { Message } from '../../src/db';
 import { DiscussionDirection } from '../../src/db';
 import { SessionStatus } from '../../src/wasm/bindings';
+import type { GroupId, GroupMessage } from '../../src/services/groups';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
 import { getTestStorageConfig } from '../testDb';
+
+/**
+ * Polling intervals of the test accounts: shorter than the SDK's defaults so
+ * that a round trip takes seconds, and well within the API's rate limits
+ * for two accounts on one address.
+ */
+const POLLING = {
+  enabled: true,
+  messagesIntervalMs: 1_000,
+  announcementsIntervalMs: 1_000,
+  sessionRefreshIntervalMs: 5_000,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // createAccount
@@ -23,7 +37,8 @@ import { getTestStorageConfig } from '../testDb';
 
 /**
  * Create a real GossipSdk instance, initialise it against the live API,
- * and open a session with a freshly-generated mnemonic.
+ * and open a session with a freshly-generated mnemonic. Polling starts once
+ * the account's bulletin cursor is set.
  *
  * Returns the SDK instance (session is open, userId is set).
  */
@@ -32,10 +47,16 @@ export async function createAccount(): Promise<GossipSdk> {
   await sdk.init({
     protocolBaseUrl: protocolConfig.baseUrl,
     storage: getTestStorageConfig(),
+    config: { polling: POLLING },
   });
 
+  // As the app does for a new account: the bulletin's history, which a new
+  // account cannot read, is skipped rather than fetched page by page.
+  const counter = sdk.prefetchBulletinCounter();
   const mnemonic = generateMnemonic();
-  await sdk.openSession({ mnemonic });
+  await sdk.openSession({ mnemonic, autoStartPolling: false });
+  await sdk.announcements.skipHistorical(counter);
+  sdk.polling.start();
   return sdk;
 }
 
@@ -49,12 +70,14 @@ export async function createAccount(): Promise<GossipSdk> {
  * @param fn        Async function to evaluate. Return a truthy value to stop.
  * @param timeoutMs Maximum wall-clock time to wait (default 30 s).
  * @param intervalMs Delay between polls (default 500 ms).
+ * @param what      What is awaited, for the error.
  * @returns The first truthy result from `fn`.
  */
 export async function pollUntil<T>(
   fn: () => Promise<T>,
   timeoutMs = 30_000,
-  intervalMs = 500
+  intervalMs = 500,
+  what = ''
 ): Promise<NonNullable<T>> {
   const deadline = Date.now() + timeoutMs;
 
@@ -64,108 +87,165 @@ export async function pollUntil<T>(
     await new Promise(r => setTimeout(r, intervalMs));
   }
 
-  throw new Error(`pollUntil timed out after ${timeoutMs} ms`);
+  throw new Error(
+    `pollUntil timed out after ${timeoutMs} ms${what ? `: ${what}` : ''}`
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// establishSession
+// startChatOfTwo
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Full session handshake between two accounts via the real API:
+ * Makes `a` and `b` contacts through the real API, then has `a` start their
+ * chat of two, as a user does (§5.12: two steps):
  *
- *   1. A fetches B's public key and adds B as a contact.
- *   2. A starts a discussion with B (sends announcement).
- *   3. B fetches announcements until the discussion request arrives.
- *   4. B accepts the discussion.
- *   5. Both sides run updateState() until the session is Active.
+ *   1. A fetches B's public key and sends B a contact request.
+ *   2. B's polling receives the request; B accepts. No chat exists yet.
+ *   3. A starts the chat with `messageTimer`; B receives it as an ordinary
+ *      invitation showing that timer, and accepts it.
+ *   4. Both sides hold the same chat of two, owned by A.
  *
- * When this resolves, both A and B have an Active session and can exchange
- * encrypted messages.
+ * Returns the chat's group key.
  */
-export async function establishSession(
+export async function startChatOfTwo(
   a: GossipSdk,
-  b: GossipSdk
-): Promise<void> {
-  const userAId = a.userId;
-  const userBId = b.userId;
-
-  // ── A adds B as a contact and starts a discussion ──
-  const pubKeyB = await a.auth.fetchPublicKeyByUserId(userBId);
-  await a.contacts.add(userBId, 'B', pubKeyB);
-  const contactB = await a.contacts.get(userBId);
+  b: GossipSdk,
+  messageTimer: number
+): Promise<GroupId> {
+  // ── B's public key may take a moment to be readable ──
+  const pubKeyB = await pollUntil(
+    async () => {
+      try {
+        return await a.auth.fetchPublicKeyByUserId(b.userId);
+      } catch {
+        return null;
+      }
+    },
+    30_000,
+    1_000,
+    "B's public key"
+  );
+  await a.contacts.add(b.userId, 'B', pubKeyB);
+  const contactB = await a.contacts.get(b.userId);
   if (!contactB) throw new Error('Failed to add contact B on A');
 
-  await a.discussions.start(contactB, {
+  // ── A sends the contact request ──
+  const started = await a.discussions.start(contactB, {
     username: 'A',
-    message: 'session-init',
+    message: 'hello',
+  });
+  if (!started.success) {
+    throw new Error(`Contact request failed: ${started.error}`);
+  }
+
+  // ── B receives it and accepts ──
+  const request = await pollUntil(
+    async () => {
+      const d = await b.discussions.get(a.userId);
+      return d?.direction === DiscussionDirection.RECEIVED ? d : null;
+    },
+    60_000,
+    500,
+    'the contact request on B'
+  );
+  const accepted = await b.discussions.accept(request);
+  if (!accepted.success) {
+    throw new Error(`Accepting the request failed: ${accepted.error}`);
+  }
+
+  // ── Once the session is active, A starts the chat ──
+  await pollUntil(
+    async () =>
+      a.discussions.getStatus(b.userId) === SessionStatus.Active ? true : null,
+    60_000,
+    500,
+    'the session on A'
+  );
+  const groupId = await a.conversations.startDirectChat(b.userId, {
+    messageTimer,
   });
 
-  // ── B polls announcements until the discussion request from A arrives ──
-  const discussionOnB = await pollUntil(async () => {
-    await b.announcements.fetch();
-    const discussions = await b.discussions.list();
-    return discussions.find(
-      d =>
-        d.contactUserId === userAId &&
-        d.direction === DiscussionDirection.RECEIVED
+  // ── B receives an ordinary invitation with that timer, and accepts ──
+  const invitation = await pollUntil(
+    async () => b.conversations.directChatInvitation(a.userId),
+    90_000,
+    500,
+    'the invitation on B'
+  );
+  if (invitation.messageTimer !== messageTimer) {
+    throw new Error(
+      `B sees the timer ${invitation.messageTimer}, not ${messageTimer}`
     );
-  });
+  }
+  await b.conversations.acceptInvitation(invitation.epochId);
 
-  // ── B accepts the discussion ──
-  await b.discussions.accept(discussionOnB);
-
-  // ── Both sides run updateState until the session is Active ──
-  // A needs to fetch B's accept-announcement and process it.
-  await pollUntil(async () => {
-    await a.announcements.fetch();
-    await a.updateState();
-    return a.discussions.getStatus(userBId) === SessionStatus.Active;
-  });
-
-  await pollUntil(async () => {
-    await b.updateState();
-    return b.discussions.getStatus(userAId) === SessionStatus.Active;
-  });
+  // ── The same chat of two on both sides ──
+  return pollUntil(
+    async () => {
+      const onB = await b.conversations.directChatWith(a.userId);
+      if (onB !== groupId) return null;
+      const [chatA, chatB] = await Promise.all([
+        a.groups.get(groupId),
+        b.groups.get(groupId),
+      ]);
+      return chatA?.status === 'member' && chatB?.status === 'member'
+        ? groupId
+        : null;
+    },
+    90_000,
+    500,
+    'the chat of two on both sides'
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// sendAndReceive
+// messagesOf / sendAndReceive
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The messages `sdk` shows in the chat `groupId`, oldest first. */
+export async function messagesOf(
+  sdk: GossipSdk,
+  groupId: GroupId
+): Promise<GroupMessage[]> {
+  return (await sdk.groups.timeline(groupId)).filter(
+    (i): i is GroupMessage => i.kind === 'message'
+  );
+}
+
+/** The text of a message, or null for another kind. */
+export function textOf(m: GroupMessage): string | null {
+  return m.body.type === 'text' ? m.body.text : null;
+}
+
 /**
- * Send a text message from `sender` to `receiver` and verify the receiver
- * gets it.
+ * Sends `text` from `sender` in the chat `groupId` and waits until
+ * `receiver` shows it.
  *
- *   1. sender.messages.sendText(receiverUserId, text)
- *   2. sender.updateState() to encrypt + push
- *   3. Poll receiver.messages.fetch() until the message appears
- *
- * Returns the received Message object on the receiver side.
+ * Returns the message as the sender and as the receiver show it.
  */
 export async function sendAndReceive(
   sender: GossipSdk,
   receiver: GossipSdk,
+  groupId: GroupId,
   text: string
-): Promise<Message> {
-  const receiverUserId = receiver.userId;
-  const senderUserId = sender.userId;
+): Promise<{ sent: GroupMessage; received: GroupMessage }> {
+  const published = await sender.groups.sendMessage(groupId, text);
+  const sent = (await messagesOf(sender, groupId)).find(
+    m => m.syncObjId === published.syncObjId
+  );
+  if (!sent) throw new Error(`"${text}" is not shown to its sender`);
 
-  // Send
-  const sendResult = await sender.messages.sendText(receiverUserId, text);
-  if (!sendResult.success) {
-    throw new Error(`sendText failed: ${sendResult.error}`);
-  }
-  await sender.updateState();
-
-  // Receive — poll until the message shows up on the receiver
-  const received = await pollUntil(async () => {
-    await receiver.messages.fetch();
-    const msgs = await receiver.messages.getVisibleMessages(senderUserId);
-    return msgs.find(m => m.content === text);
-  });
-
-  return received;
+  const received = await pollUntil(
+    async () =>
+      (await messagesOf(receiver, groupId)).find(
+        m => m.syncObjId === published.syncObjId
+      ),
+    60_000,
+    500,
+    `"${text}" on the receiver`
+  );
+  return { sent, received };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,12 +253,15 @@ export async function sendAndReceive(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Close all open sessions. Swallows errors so afterEach/afterAll never throws.
+ * Close all open sessions (polling stops with them). Swallows errors so
+ * afterEach/afterAll never throws.
  */
-export async function cleanup(...accounts: GossipSdk[]): Promise<void> {
+export async function cleanup(
+  ...accounts: (GossipSdk | undefined)[]
+): Promise<void> {
   await Promise.allSettled(
     accounts.map(sdk => {
-      if (sdk.isSessionOpen) return sdk.closeSession();
+      if (sdk?.isSessionOpen) return sdk.closeSession();
     })
   );
 }

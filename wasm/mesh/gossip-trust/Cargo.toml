@@ -1,0 +1,30 @@
+[package]
+name = "gossip-trust"
+version.workspace = true
+edition = "2021"
+rust-version = "1.98"
+license.workspace = true
+description = "Gossip P2P backend: trust-proof protocol interface, trust policy, nullifier registry and built-in schemes"
+
+[dependencies]
+gossip-wire = { workspace = true }
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+# No log line in a release build (privacy rule): `quiet-release` compiles every
+# `tracing` line out of the release profile. Only the full-debug build of the app
+# leaves it out (`--no-default-features --features full-debug` on gossip-mobile).
+default = ["quiet-release"]
+quiet-release = ["tracing/release_max_level_off"]
+full-debug = []
+
+[dev-dependencies]
+serde_json = { workspace = true }
+toml = { workspace = true }

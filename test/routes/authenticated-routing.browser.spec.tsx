@@ -74,6 +74,21 @@ vi.mock('../../src/pages/InvitePage', () => ({
 vi.mock('../../src/pages/PortableBackup', () => ({
   default: stubPage('page-portable-backup'),
 }));
+vi.mock('../../src/pages/NewGroup', () => ({
+  default: stubPage('page-new-group'),
+}));
+vi.mock('../../src/pages/GroupDiscussion', () => ({
+  default: stubPage('page-group'),
+}));
+vi.mock('../../src/pages/GroupSettings', () => ({
+  default: stubPage('page-group-settings'),
+}));
+vi.mock('../../src/pages/Invitation', () => ({
+  default: stubPage('page-invitation'),
+}));
+vi.mock('../../src/pages/ArchivedChats', () => ({
+  default: stubPage('page-archived-chats'),
+}));
 
 // Settings sub-pages
 vi.mock('../../src/pages/settings/SecuritySettings', () => ({
@@ -106,6 +121,15 @@ vi.mock('../../src/pages/settings/Web3Settings', () => ({
 vi.mock('../../src/pages/settings/PrivacySettings', () => ({
   default: stubPage('page-settings-privacy'),
 }));
+vi.mock('../../src/pages/settings/MeshSettings', () => ({
+  default: stubPage('page-settings-mesh'),
+}));
+vi.mock('../../src/pages/settings/MeshPrepareSettings', () => ({
+  default: stubPage('page-settings-mesh-prepare'),
+}));
+vi.mock('../../src/pages/settings/ShareAppSettings', () => ({
+  default: stubPage('page-settings-mesh-share-app'),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock hooks used by AuthenticatedRoutes
@@ -119,11 +143,16 @@ vi.mock('../../src/hooks/usePendingSharedContent', () => ({
   usePendingSharedContent: vi.fn(),
 }));
 
+vi.mock('../../src/hooks/useNotificationPermissionPrompt', () => ({
+  useNotificationPermissionPrompt: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Mock infrastructure (Capacitor, stores used by MainLayout/BottomNavigation)
 // ---------------------------------------------------------------------------
 
 vi.mock('@capacitor/core', () => ({
+  registerPlugin: () => ({}),
   Capacitor: {
     getPlatform: vi.fn(() => 'web'),
     isNativePlatform: vi.fn(() => false),
@@ -233,6 +262,25 @@ describe('AuthenticatedRoutes', () => {
       await renderAtRoute('/new-discussion');
       await expect
         .element(page.getByTestId('page-new-discussion'))
+        .toBeInTheDocument();
+    });
+
+    it('renders NewGroup page at /new-group', async () => {
+      await renderAtRoute('/new-group');
+      await expect
+        .element(page.getByTestId('page-new-group'))
+        .toBeInTheDocument();
+    });
+
+    it('renders a group at /group/:groupId', async () => {
+      await renderAtRoute('/group/abc123');
+      await expect.element(page.getByTestId('page-group')).toBeInTheDocument();
+    });
+
+    it('renders group details at /group/:groupId/settings', async () => {
+      await renderAtRoute('/group/abc123/settings');
+      await expect
+        .element(page.getByTestId('page-group-settings'))
         .toBeInTheDocument();
     });
 

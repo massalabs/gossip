@@ -13,6 +13,7 @@ auth = { path = "../auth" }
 crypto-aead = { path = "../crypto-aead" }
 crypto-rng = { path = "../crypto-rng" }
 crypto-password-kdf = { path = "../crypto-password-kdf" }
+groups = { path = "../groups" }
 
 wasm-bindgen = "0.2"
 serde = { version = "1.0", features = ["derive"] }
@@ -22,6 +23,11 @@ js-sys = "0.3"
 console_error_panic_hook = "0.1"
 web-time = "1.1"
 massa_signature = { git = "https://github.com/massalabs/massa.git", package = "massa_signature", default-features = false }
+
+[features]
+# The full debug build of the app: the group engine's debug events, handed to a JS callback
+# (see `GroupsNode::set_debug_sink`). Off in every normal build.
+full-debug = ["groups/full-debug"]
 
 [dependencies.web-sys]
 version = "0.3"

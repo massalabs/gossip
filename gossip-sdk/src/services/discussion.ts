@@ -22,19 +22,18 @@ import {
 } from '../utils/discussions.js';
 import {
   AnnouncementPayload,
-  encodeAnnouncementPayload,
+  encodeContactRequestPayload,
 } from '../utils/announcementPayload.js';
 import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
 import { AnnouncementService } from './announcement.js';
 import { SessionModule } from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { RefreshService } from './refresh.js';
-import type { MessageService } from './message.js';
 import type { AuthService } from './auth.js';
 import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import { Queries } from '../db/queries/index.js';
-import { decodeUserId } from '../utils/userId.js';
+import { canonicalUserId, decodeUserId } from '../utils/userId.js';
 import { addContact } from '../utils/contacts.js';
 
 const logger = new Logger('DiscussionService');
@@ -66,7 +65,6 @@ export class DiscussionService {
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private refreshService?: RefreshService;
-  private messageService?: MessageService;
   private authService?: AuthService;
   private queries: Queries;
 
@@ -88,16 +86,14 @@ export class DiscussionService {
     this.refreshService = refreshService;
   }
 
-  setMessageService(messageService: MessageService): void {
-    this.messageService = messageService;
-  }
-
   setAuthService(authService: AuthService): void {
     this.authService = authService;
   }
 
   /**
-   * Initialize a discussion with a contact using SessionManager
+   * Initialize a discussion with a contact using SessionManager: the contact
+   * request (§5.12). It opens a session and starts no chat: either person
+   * starts one later (`conversations.startDirectChat`).
    * @param contact - The contact to start a discussion with
    * @param payload - Optional payload to include in the announcement (username and message)
    * @returns The discussion ID and the created announcement
@@ -117,53 +113,101 @@ export class DiscussionService {
     contact: Contact,
     payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contact.userId
+    );
+    if (existing?.id) {
+      return {
+        success: false,
+        error: new Error('Discussion already exists'),
+      };
+    }
+    return this.sendRequest(contact, payload, undefined);
+  }
+
+  /**
+   * Sends a contact request to `contact`, an existing contact whose
+   * discussion row may exist already (a contact the user added on their own
+   * whose connection lapsed, §5.12, D.100). The request is the one
+   * `initialize` sends for the same inputs, byte for byte in what it
+   * carries: the same payload, nothing added. Only the device's own rows
+   * differ: the discussion is reused, as the request being sent anew.
+   */
+  async requestAgain(
+    contact: Contact,
+    payload?: AnnouncementPayload
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contact.userId
+    );
+    return this.sendRequest(
+      contact,
+      payload,
+      existing?.id !== undefined ? existing : undefined
+    );
+  }
+
+  private async sendRequest(
+    contact: Contact,
+    payload: AnnouncementPayload | undefined,
+    existing:
+      | Pick<
+          Discussion,
+          'id' | 'weAccepted' | 'direction' | 'announcementMessage'
+        >
+      | undefined
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
     try {
       const userId = this.session.userIdEncoded;
 
-      const existing = await this.queries.discussions.getByOwnerAndContact(
-        userId,
-        contact.userId
-      );
-
-      if (existing?.id) {
-        return {
-          success: false,
-          error: new Error('Discussion already exists'),
-        };
-      }
-
       log.info(
         `${userId} is establishing session with contact ${contact.name}`
       );
-      const discussionId = await this.queries.discussions.insert({
-        ownerUserId: userId,
-        contactUserId: contact.userId,
-        weAccepted: true,
-        direction: DiscussionDirection.INITIATED,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      log.info(`discussion created with id: ${discussionId}`);
-
-      let payloadBytes: Uint8Array | undefined;
-      if (payload) {
-        payloadBytes = encodeAnnouncementPayload(
-          payload.username,
-          payload.message
-        );
+      let discussionId: number;
+      if (existing?.id !== undefined) {
+        discussionId = existing.id;
+        // As a discussion `initialize` creates: the request is sent by this
+        // user, and no request of the peer's waits on it any more.
+        await this.queries.discussions.updateById(discussionId, {
+          weAccepted: true,
+          direction: DiscussionDirection.INITIATED,
+          announcementMessage: null,
+          updatedAt: new Date(),
+        });
+      } else {
+        discussionId = await this.queries.discussions.insert({
+          ownerUserId: userId,
+          contactUserId: contact.userId,
+          weAccepted: true,
+          direction: DiscussionDirection.INITIATED,
+          unreadCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        log.info(`discussion created with id: ${discussionId}`);
       }
 
+      // Never empty: a contact request is told from a connection by its
+      // payload (§5.12). No message timer: the request starts no chat.
       const result = await this.createSessionForContact(
         contact.userId,
-        payloadBytes ?? new Uint8Array(0)
+        encodeContactRequestPayload(payload?.username, payload?.message)
       );
 
       if (!result.success) {
-        await this.queries.discussions.deleteById(discussionId);
+        if (existing?.id !== undefined) {
+          await this.queries.discussions.updateById(discussionId, {
+            weAccepted: existing.weAccepted,
+            direction: existing.direction,
+            announcementMessage: existing.announcementMessage,
+          });
+        } else {
+          await this.queries.discussions.deleteById(discussionId);
+        }
         return { success: false, error: result.error };
       }
 
@@ -205,7 +249,56 @@ export class DiscussionService {
   }
 
   /**
-   * Accept a discussion request from a contact using SessionManager
+   * Opens a connection with `contact` (§5.12): a session, recorded by a
+   * discussion that is never a conversation, without a request message and
+   * without a direct chat owed. Used for the members of accepted groups.
+   */
+  async openConnection(contact: Contact): Promise<Result<Uint8Array, Error>> {
+    const userId = this.session.userIdEncoded;
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      userId,
+      contact.userId
+    );
+    if (existing) {
+      return this.createSessionForContact(contact.userId, new Uint8Array(0));
+    }
+    const discussionId = await this.queries.discussions.insert({
+      ownerUserId: userId,
+      contactUserId: contact.userId,
+      weAccepted: true,
+      direction: DiscussionDirection.INITIATED,
+      unreadCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const result = await this.createSessionForContact(
+      contact.userId,
+      new Uint8Array(0)
+    );
+    if (!result.success) {
+      await this.queries.discussions.deleteById(discussionId);
+    }
+    return result;
+  }
+
+  /**
+   * Called when the user accepts a contact request, before the session is
+   * accepted: the requester becomes a contact the user accepted (§5.12).
+   * It gives no consent to a chat: accepting a contact starts none.
+   */
+  private onContactAccepted?: (contactUserId: string) => Promise<void>;
+
+  setOnContactAccepted(
+    hook: ((contactUserId: string) => Promise<void>) | undefined
+  ): void {
+    this.onContactAccepted = hook;
+  }
+
+  /**
+   * Accept a discussion request from a contact using SessionManager.
+   * Accepting a contact request makes the requester a contact and opens the
+   * session; it starts no chat and consents to none (§5.12): either person
+   * starts one later, which the other receives as an ordinary invitation.
    * @param discussion - The discussion to accept
    */
   async accept(discussion: Discussion): Promise<Result<Uint8Array, Error>> {
@@ -213,6 +306,38 @@ export class DiscussionService {
     try {
       if (!discussion.id) {
         return { success: false, error: new Error('Discussion ID is missing') };
+      }
+
+      // The request of a member of a chat held (§5.12): its connection was
+      // answered when it arrived, and the session is open. Accepting sends
+      // nothing more: a new announcement would only tell the requester when
+      // the user answered, and replace a session the chats use.
+      const contact = await this.queries.contacts.getByOwnerAndUser(
+        this.session.userIdEncoded,
+        discussion.contactUserId
+      );
+      const connected =
+        contact?.connection === 'requested' &&
+        this.session.peerSessionStatus(
+          decodeUserId(discussion.contactUserId)
+        ) === SessionStatus.Active;
+
+      try {
+        await this.onContactAccepted?.(discussion.contactUserId);
+      } catch {
+        log.error('contact not marked accepted');
+      }
+
+      if (connected) {
+        await this.queries.discussions.updateById(discussion.id, {
+          weAccepted: true,
+          updatedAt: new Date(),
+        });
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_ACCEPTED,
+          discussion.contactUserId
+        );
+        return { success: true, data: new Uint8Array(0) };
       }
 
       const result = await this.createSessionForContact(
@@ -271,6 +396,7 @@ export class DiscussionService {
   ): Promise<Result<Uint8Array, Error>> {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
+    contactUserId = canonicalUserId(contactUserId);
 
     const discussion = await this.queries.discussions.getByOwnerAndContact(
       ownerUserId,
@@ -309,10 +435,11 @@ export class DiscussionService {
       await this.queries.discussions.updateById(discussion.id!, {
         weAccepted: true,
         sendAnnouncement: serializeSendAnnouncement({
-          announcement_bytes: sessionResult.data,
+          announcement_bytes: sessionResult.data.announcement,
+          mailbox: sessionResult.data.mailbox,
           when_to_send: now,
         }),
-        initiationAnnouncement: sessionResult.data,
+        initiationAnnouncement: sessionResult.data.announcement,
         updatedAt: now,
       });
 
@@ -342,7 +469,7 @@ export class DiscussionService {
       };
     }
 
-    return { success: true, data: sessionResult.data };
+    return { success: true, data: sessionResult.data.announcement };
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -381,6 +508,7 @@ export class DiscussionService {
     if (!this.authService) {
       return { success: false, error: new Error('AuthService not set') };
     }
+    contactUserId = canonicalUserId(contactUserId);
 
     const pubKeys =
       await this.authService.fetchPublicKeyByUserId(contactUserId);
@@ -437,7 +565,7 @@ export class DiscussionService {
   async get(contactUserId: string): Promise<Discussion | undefined> {
     const row = await this.queries.discussions.getByOwnerAndContact(
       this.session.userIdEncoded,
-      contactUserId
+      canonicalUserId(contactUserId)
     );
     return row ? toDiscussion(row) : undefined;
   }
@@ -464,9 +592,9 @@ export class DiscussionService {
   }
 
   /**
-   * Set the auto-delete retention policy for a discussion.
-   * Updates the local DB and sends a control message to the peer so both sides
-   * apply the same policy (last-write-wins).
+   * Set the auto-delete retention policy of a discussion, on this device
+   * only: the earlier one-to-one format, which carried it to the peer, is no
+   * longer sent (§2.1).
    *
    * @param contactUserId - The contact user ID of the discussion
    * @param durationSeconds - Retention duration in seconds, or null to disable
@@ -475,50 +603,14 @@ export class DiscussionService {
     contactUserId: string,
     durationSeconds: number | null
   ): Promise<void> {
-    const ownerUserId = this.session.userIdEncoded;
-
-    // Update local DB
     await this.queries.discussions.updateByOwnerAndContact(
-      ownerUserId,
+      this.session.userIdEncoded,
       contactUserId,
       {
         messageRetentionDuration: durationSeconds,
         retentionPolicySetAt: Date.now(),
       }
     );
-
-    // Send control message to peer so they apply the same policy
-    if (this.messageService) {
-      const encodedDuration =
-        durationSeconds && durationSeconds > 0 ? durationSeconds : 0;
-      await this.messageService.send({
-        ownerUserId,
-        contactUserId,
-        content: String(encodedDuration),
-        type: MessageType.RETENTION_POLICY,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-      });
-    }
-
-    // Restore the correct lastMessageContent by re-deriving from the last
-    // visible message — the control message must not pollute the preview.
-    const lastVisible =
-      await this.queries.messages.getLastVisibleByOwnerAndContact(
-        ownerUserId,
-        contactUserId
-      );
-    await this.queries.discussions.updateByOwnerAndContact(
-      ownerUserId,
-      contactUserId,
-      {
-        lastMessageContent: lastVisible?.content ?? null,
-        lastMessageTimestamp: lastVisible?.timestamp ?? null,
-        lastMessageId: lastVisible?.id ?? null,
-      }
-    );
-
     await this.refreshService?.stateUpdate();
   }
 }

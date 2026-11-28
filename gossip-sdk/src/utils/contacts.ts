@@ -5,11 +5,19 @@ import { logger } from './logs.js';
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { decodeUserId } from './userId.js';
+import { canonicalUserId, decodeUserId } from './userId.js';
 import type { SessionModule } from '../wasm/session.js';
 import type { UserPublicKeys } from '../wasm/bindings.js';
 import type { Contact } from '../db/index.js';
 import { Queries } from '../db/queries/index.js';
+
+/** The prefix of the name given to a requester who sent none. */
+export const TEMPORARY_CONTACT_NAME_PREFIX = 'New Request';
+
+/** Whether `name` is one given to a requester who sent none. */
+export function isTemporaryContactName(name: string): boolean {
+  return /^New Request \d+$/.test(name);
+}
 
 export type AddContactResult = {
   success: boolean;
@@ -127,6 +135,15 @@ export async function deleteContact(
       };
     }
 
+    // Remember where the peer's announcements stood: a mesh can bring any of
+    // them back, and the session manager forgets the peer below
+    const floor = session.peerLatestIncomingAnnouncementTimestamp(
+      decodeUserId(contactUserId)
+    );
+    if (floor !== undefined) {
+      await queries.discardedPeers.raise(ownerUserId, contactUserId, floor);
+    }
+
     // Delete contact, discussions, and messages atomically
     await queries.conn.withTransaction(async tx => {
       await queries.contacts.deleteByOwnerAndUser(
@@ -140,6 +157,12 @@ export async function deleteContact(
         tx
       );
       await queries.messages.deleteByOwnerAndContact(
+        ownerUserId,
+        contactUserId,
+        tx
+      );
+      // Group ciphertexts waiting for this contact name it: they go too.
+      await queries.groups.deleteOutboxByContact(
         ownerUserId,
         contactUserId,
         tx
@@ -171,6 +194,8 @@ export async function addContact(
   queries: Queries
 ): Promise<AddContactResult> {
   try {
+    // one spelling in the database, whatever the caller was given
+    userId = canonicalUserId(userId);
     const existing = await queries.contacts.getByOwnerAndUser(
       ownerUserId,
       userId

@@ -1,4 +1,6 @@
 import { logger } from '../utils/logs.js';
+import { dlog } from '../utils/debugLog.js';
+import { errFields, since } from '../utils/debugFields.js';
 /**
  * SDK Polling Manager
  *
@@ -61,6 +63,16 @@ export class SdkPolling {
     this.callbacks = callbacks;
     this.eventEmitter = eventEmitter;
 
+    dlog(
+      'sdk',
+      'sync.start',
+      {
+        messagesIntervalMs: config.polling.messagesIntervalMs,
+        announcementsIntervalMs: config.polling.announcementsIntervalMs,
+        sessionRefreshIntervalMs: config.polling.sessionRefreshIntervalMs,
+      },
+      { lvl: 'info' }
+    );
     logger.info('[SdkPolling] Starting polling', {
       messagesIntervalMs: config.polling.messagesIntervalMs,
       announcementsIntervalMs: config.polling.announcementsIntervalMs,
@@ -69,9 +81,22 @@ export class SdkPolling {
 
     // Start message polling
     this.timers.messages = setInterval(async () => {
+      const started = performance.now();
       try {
         await this.callbacks?.fetchMessages();
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'messages' },
+          { dur: since(started) }
+        );
       } catch (error) {
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'messages', ...errFields(error) },
+          { lvl: 'error', dur: since(started) }
+        );
         const err = error instanceof Error ? error : new Error(String(error));
         this.eventEmitter?.emit(SdkEventType.ERROR, {
           error: err,
@@ -82,9 +107,22 @@ export class SdkPolling {
 
     // Start announcement polling
     this.timers.announcements = setInterval(async () => {
+      const started = performance.now();
       try {
         await this.callbacks?.fetchAnnouncements();
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'announcements' },
+          { dur: since(started) }
+        );
       } catch (error) {
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'announcements', ...errFields(error) },
+          { lvl: 'error', dur: since(started) }
+        );
         const err = error instanceof Error ? error : new Error(String(error));
         this.eventEmitter?.emit(SdkEventType.ERROR, {
           error: err,
@@ -95,9 +133,22 @@ export class SdkPolling {
 
     // Start session refresh polling
     this.timers.sessionRefresh = setInterval(async () => {
+      const started = performance.now();
       try {
         await this.callbacks?.handleSessionRefresh();
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'sessionRefresh' },
+          { dur: since(started) }
+        );
       } catch (error) {
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'sessionRefresh', ...errFields(error) },
+          { lvl: 'error', dur: since(started) }
+        );
         const err = error instanceof Error ? error : new Error(String(error));
         this.eventEmitter?.emit(SdkEventType.ERROR, {
           error: err,
@@ -108,9 +159,22 @@ export class SdkPolling {
 
     // Start session status change polling (fixed 3s interval)
     this.timers.sessionStatus = setInterval(async () => {
+      const started = performance.now();
       try {
         await this.callbacks?.refreshSessionsStatusEvent();
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'sessionStatus' },
+          { dur: since(started) }
+        );
       } catch (error) {
+        dlog(
+          'sdk',
+          'sync.cycle',
+          { loop: 'sessionStatus', ...errFields(error) },
+          { lvl: 'error', dur: since(started) }
+        );
         const err = error instanceof Error ? error : new Error(String(error));
         this.eventEmitter?.emit(SdkEventType.ERROR, {
           error: err,

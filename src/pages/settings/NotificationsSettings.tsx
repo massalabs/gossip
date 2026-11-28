@@ -15,6 +15,7 @@ import {
   notificationService,
   type NotificationPreferences,
 } from '../../services/notifications';
+import { setNotificationsEnabled } from '../../services/notificationDependents';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 import { Bell } from 'react-feather';
@@ -77,9 +78,12 @@ const NotificationsSettings: React.FC = () => {
   }, [refreshPrefs]);
 
   const handleNotificationToggle = useCallback(
-    (enabled: boolean) => {
-      notificationService.setEnabled(enabled);
+    async (enabled: boolean) => {
+      // Saved synchronously; the dependents (keep sync active, background
+      // runner) follow in order.
+      const applied = setNotificationsEnabled(enabled);
       void refreshPrefs();
+      await applied.catch(() => {});
     },
     [refreshPrefs]
   );
@@ -197,19 +201,21 @@ const NotificationsSettings: React.FC = () => {
           )}
       </div>
 
-      {notificationPrefs.permission.granted && notificationPrefs.enabled && (
-        <>
-          {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
-          {Capacitor.isNativePlatform() && (
-            <div className="mt-6">
-              <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-            </div>
-          )}
+      {/* Background sync exists to notify: with the switch off it is shown
+          greyed (and stopped), keeping the user's choices for later. */}
+      {notificationPrefs.permission.granted && Capacitor.isNativePlatform() && (
+        <div className="mt-6">
+          <BackgroundSyncSettings
+            showDebugInfo={showDebugOption}
+            notificationsOn={notificationPrefs.enabled}
+          />
+        </div>
+      )}
 
-          <div className="mt-6">
-            <BackgroundSyncPrivacyNotice />
-          </div>
-        </>
+      {notificationPrefs.permission.granted && notificationPrefs.enabled && (
+        <div className="mt-6">
+          <BackgroundSyncPrivacyNotice />
+        </div>
       )}
     </PageLayout>
   );

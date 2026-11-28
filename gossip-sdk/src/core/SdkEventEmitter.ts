@@ -6,6 +6,7 @@ import { logger } from '../utils/logs.js';
 import mitt from 'mitt';
 import type { Message, Discussion, Contact } from '../db';
 import type { SessionStatus } from '../wasm/bindings';
+import type { GroupChange } from '../services/groups.js';
 
 export enum SdkEventType {
   MESSAGE_RECEIVED = 'messageReceived',
@@ -23,6 +24,21 @@ export enum SdkEventType {
   DISCUSSION_UPDATED = 'discussionUpdated',
   MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
   CONTACT_DELETED = 'contactDeleted',
+  /** A contact's name or connection changed (§5.12). */
+  CONTACT_UPDATED = 'contactUpdated',
+  /** Group chats changed: invitations, membership, messages, state. */
+  GROUPS_CHANGED = 'groupsChanged',
+  /**
+   * Two direct chats were created at once (§5.12): the one closed and the
+   * one kept, and whether messages written in the closed one were lost.
+   */
+  DIRECT_CHAT_SUPERSEDED = 'directChatSuperseded',
+  /**
+   * The server refused a send at a seeker it already held (409): the session
+   * with the peer was renewed, or, when it was renewed for this less than an
+   * hour ago, nothing was and the ciphertext was dropped (a warning).
+   */
+  SEEKER_CONFLICT = 'seekerConflict',
   ERROR = 'error',
 }
 
@@ -51,6 +67,17 @@ export type SdkEvents = {
     messageDbId: number;
   };
   [SdkEventType.CONTACT_DELETED]: { contactUserId: string };
+  [SdkEventType.CONTACT_UPDATED]: { contactUserId: string };
+  [SdkEventType.GROUPS_CHANGED]: {
+    changes: GroupChange[];
+  };
+  [SdkEventType.DIRECT_CHAT_SUPERSEDED]: {
+    contactUserId: string | null;
+    groupId: string;
+    by: string;
+    hasMessages: boolean;
+  };
+  [SdkEventType.SEEKER_CONFLICT]: { contactUserId: string; renewed: boolean };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
 

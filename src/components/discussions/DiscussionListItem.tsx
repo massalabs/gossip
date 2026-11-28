@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useMinuteTick } from '../../hooks/useMinuteTick';
 import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { BellOff, Bookmark, Edit2 } from 'react-feather';
+import { Archive, BellOff, Bookmark, Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { BookOpen } from 'react-feather';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
-import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
+import type { GroupInvitation, LeaveChoice } from '@massalabs/gossip-sdk';
+import LeaveGroupSheet from '../groups/LeaveGroupSheet';
 import ContextMenu from '../ui/ContextMenu';
 import Button from '../ui/Button';
 import { useDiscussionStore } from '../../stores/discussionStore';
@@ -22,10 +23,24 @@ interface DiscussionListItemProps {
   contact: Contact;
   lastMessage: LastMessageInfo;
   onSelect: (discussion: Discussion) => void;
-  onAccept: (discussion: Discussion, newName?: string) => void;
-  onRefuse: (discussion: Discussion) => void;
+  /** Kept for callers; a contact request is answered on its own screen. */
+  onAccept?: (discussion: Discussion, newName?: string) => void;
+  onRefuse?: (discussion: Discussion) => void;
+  /** The peer's migration of this archive, pending (§5.12). */
+  migrationInvitation?: GroupInvitation;
+  /** The contact started the pair's chat; its invitation waits (§5.12). */
+  chatInvitation?: boolean;
+  onAcceptMigration?: (invitation: GroupInvitation) => Promise<void>;
+  onDeclineMigration?: (
+    invitation: GroupInvitation,
+    choice: LeaveChoice
+  ) => Promise<void>;
+  /** Opens the invitation screen of a contact request. */
+  onOpenInvitation?: (discussion: Discussion) => void;
   onEditName?: (discussion: Discussion, newName: string) => void;
   onTogglePin?: (discussion: Discussion) => void;
+  /** Moves an archive to the archived list, or back (Lucas's screen 14). */
+  onToggleArchived?: (discussion: Discussion) => void;
 }
 
 const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
@@ -33,56 +48,50 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   contact,
   lastMessage,
   onSelect,
-  onAccept,
-  onRefuse,
+  migrationInvitation,
+  chatInvitation = false,
+  onAcceptMigration,
+  onDeclineMigration,
+  onOpenInvitation,
   onEditName,
   onTogglePin,
+  onToggleArchived,
 }) => {
   const { t } = useTranslation('discussions');
-  const [proposedName, setProposedName] = useState(contact.name || '');
-  const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const [isEditNameModalOpen, setIsEditNameModalOpen] = useState(false);
+  const [declining, setDeclining] = useState(false);
+  const [busy, setBusy] = useState(false);
   // Shared once-a-minute re-render to refresh the relative time display
   useMinuteTick();
 
-  // Store persists modal open-state across component remounts; a local flag
-  // covers discussions without an id yet.
-  const openNameModals = useDiscussionStore(s => s.openNameModals);
-  const setModalOpen = useDiscussionStore(s => s.setModalOpen);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
-  const isModalOpenInStore = discussion.id
-    ? openNameModals.has(discussion.id)
-    : false;
-  const [isNameModalOpenLocal, setIsNameModalOpenLocal] =
-    useState(isModalOpenInStore);
-
+  // A contact request is answered on the invitation screen (§5.12).
   const isPendingIncoming =
     sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.PeerRequested;
 
-  // Derived: no mirror effects needed — the modal only renders in the
-  // pending-incoming branch, so it closes automatically when the state flips.
-  const isNameModalOpen =
-    isPendingIncoming && (isNameModalOpenLocal || isModalOpenInStore);
-
-  const setIsNameModalOpen = (open: boolean) => {
-    setIsNameModalOpenLocal(open);
-    if (discussion.id) setModalOpen(discussion.id, open);
-  };
-
-  // Store hygiene: drop the persisted open-flag once the discussion is no
-  // longer pending.
-  useEffect(() => {
-    if (!isPendingIncoming && discussion.id && isModalOpenInStore) {
-      setModalOpen(discussion.id, false);
+  const answerMigration = async (fn?: () => Promise<void>) => {
+    if (!fn) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
     }
-  }, [isPendingIncoming, discussion.id, isModalOpenInStore, setModalOpen]);
+  };
   const isPendingOutgoing =
     sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.SelfRequested;
 
   const isPending = isPendingIncoming || isPendingOutgoing;
+  // A contact with no chat (§5.12): adding a contact starts none. Its row
+  // says so, or that the contact invites to the pair's chat, rather than
+  // the request's message, which belongs to the request only.
+  const noChat =
+    discussion.contactUserId !== SELF_CONTACT_ID &&
+    !discussion.isArchive &&
+    !isPending;
 
   const longPress = useLongPress({
     onLongPress: () => setIsContextMenuOpen(true),
@@ -140,6 +149,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     className="w-3.5 h-3.5 text-muted-foreground/70 fill-muted-foreground/30"
                   />
                 )}
+                {discussion.isArchive && (
+                  <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
+                    {t('groups:archive.badge')}
+                  </span>
+                )}
                 {isPendingOutgoing && (
                   <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
                     {t('header.waiting_approval')}
@@ -169,25 +183,13 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                 </p>
                 <div className="mt-2 flex items-center gap-2">
                   <Button
-                    onClick={() => {
-                      setProposedName(contact.name || '');
-                      setIsNameModalOpen(true);
-                    }}
+                    onClick={() => onOpenInvitation?.(discussion)}
                     variant="primary"
                     size="custom"
                     className="px-2.5 py-1 text-xs font-medium rounded border border-accent-soft-foreground/40 text-accent-soft-foreground hover:bg-accent-soft"
+                    data-testid="open-invitation"
                   >
-                    {t('list.accept')}
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setIsRefuseModalOpen(true);
-                    }}
-                    variant="outline"
-                    size="custom"
-                    className="px-2.5 py-1 text-xs font-medium rounded border border-border text-foreground hover:bg-accent"
-                  >
-                    {t('list.refuse')}
+                    {t('groups:invite.open')}
                   </Button>
                   {discussion.unreadCount > 0 && (
                     <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
@@ -195,72 +197,71 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     </span>
                   )}
                 </div>
-                {/* Name prompt modal */}
-                <ContactNameModal
-                  isOpen={isNameModalOpen}
-                  onClose={() => setIsNameModalOpen(false)}
-                  title={t('list.set_contact_name')}
-                  initialName={proposedName}
-                  confirmLabel={t('common:continue')}
-                  allowEmpty
-                  showSkip
-                  onConfirm={name => {
-                    setIsNameModalOpen(false);
-                    if (name && name.trim()) {
-                      onAccept(discussion, name.trim());
-                    } else {
-                      onAccept(discussion);
-                    }
-                  }}
-                  onSkip={() => {
-                    setIsNameModalOpen(false);
-                    // Pass the prefilled name (peer's shared username) so the
-                    // contact gets a proper display name even when skipping
-                    // the rename step.
-                    const fallback = proposedName.trim();
-                    onAccept(discussion, fallback || undefined);
+              </>
+            ) : migrationInvitation ? (
+              <div
+                className="mt-2 flex items-center gap-2"
+                onClick={e => e.stopPropagation()}
+                data-testid="migration-row-actions"
+              >
+                <Button
+                  onClick={() =>
+                    answerMigration(
+                      onAcceptMigration &&
+                        (() => onAcceptMigration(migrationInvitation))
+                    )
+                  }
+                  disabled={busy}
+                  variant="primary"
+                  size="custom"
+                  className="px-2.5 py-1 text-xs font-medium rounded border border-accent-soft-foreground/40 text-accent-soft-foreground hover:bg-accent-soft"
+                >
+                  {t('groups:invitation.accept')}
+                </Button>
+                <Button
+                  onClick={() => setDeclining(true)}
+                  disabled={busy}
+                  variant="outline"
+                  size="custom"
+                  className="px-2.5 py-1 text-xs font-medium rounded border border-border text-foreground hover:bg-accent"
+                >
+                  {t('groups:invitation.decline')}
+                </Button>
+                <LeaveGroupSheet
+                  isOpen={declining}
+                  mode="decline"
+                  onClose={() => setDeclining(false)}
+                  onAction={action => {
+                    setDeclining(false);
+                    if (action.type !== 'decline') return;
+                    void answerMigration(
+                      onDeclineMigration &&
+                        (() =>
+                          onDeclineMigration(
+                            migrationInvitation,
+                            action.choice
+                          ))
+                    );
                   }}
                 />
-                {/* Refuse confirm modal */}
-                <BaseModal
-                  isOpen={isRefuseModalOpen}
-                  onClose={() => setIsRefuseModalOpen(false)}
-                  title={t('list.refuse_title')}
-                >
-                  <div className="space-y-4">
-                    <p className="text-sm text-foreground">
-                      {t('list.refuse_body')}
-                    </p>
-                    <div className="flex gap-3">
-                      <Button
-                        onClick={() => {
-                          setIsRefuseModalOpen(false);
-                          onRefuse(discussion);
-                        }}
-                        variant="danger"
-                        size="custom"
-                        className="flex-1 h-11 rounded-lg font-semibold"
-                      >
-                        {t('list.refuse')}
-                      </Button>
-                      <Button
-                        onClick={() => setIsRefuseModalOpen(false)}
-                        variant="secondary"
-                        size="custom"
-                        className="flex-1 h-11 rounded-lg font-semibold"
-                      >
-                        {t('common:cancel')}
-                      </Button>
-                    </div>
-                  </div>
-                </BaseModal>
-              </>
+              </div>
             ) : (
               <div className="flex items-center justify-between mt-1">
-                {discussion.contactUserId !== SELF_CONTACT_ID && (
-                  <p className="text-sm text-muted-foreground truncate">
-                    {lastMessage?.content || ''}
+                {noChat ? (
+                  <p
+                    className="text-sm text-muted-foreground truncate"
+                    data-testid="no-chat-yet"
+                  >
+                    {chatInvitation
+                      ? t('list_item.chat_invitation')
+                      : t('list_item.no_chat')}
                   </p>
+                ) : (
+                  discussion.contactUserId !== SELF_CONTACT_ID && (
+                    <p className="text-sm text-muted-foreground truncate">
+                      {lastMessage?.content || ''}
+                    </p>
+                  )
                 )}
                 {discussion.unreadCount > 0 && (
                   <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
@@ -288,6 +289,17 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
             icon: <Edit2 className="w-4 h-4" />,
             onClick: () => setIsEditNameModalOpen(true),
           },
+          ...(discussion.isArchive && onToggleArchived
+            ? [
+                {
+                  label: discussion.archived
+                    ? t('groups:archive.unarchive')
+                    : t('groups:archive.archive'),
+                  icon: <Archive className="w-4 h-4" />,
+                  onClick: () => onToggleArchived(discussion),
+                },
+              ]
+            : []),
         ]}
         isOpen={isContextMenuOpen}
         onClose={() => setIsContextMenuOpen(false)}

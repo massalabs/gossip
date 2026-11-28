@@ -1,0 +1,1 @@
+ALTER TABLE `groupOutbox` ADD `meshOnlySince` integer;

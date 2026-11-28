@@ -23,6 +23,18 @@ import {
   UserKeys,
 } from './bindings.js';
 import { encodeUserId } from '../utils/userId.js';
+import { debugLogEnabled, dlog } from '../utils/debugLog.js';
+import { errFields, hex, shortId, since } from '../utils/debugFields.js';
+
+const STATUS_NAMES: Record<number, string> = {
+  [SessionStatus.Active]: 'Active',
+  [SessionStatus.UnknownPeer]: 'UnknownPeer',
+  [SessionStatus.NoSession]: 'NoSession',
+  [SessionStatus.PeerRequested]: 'PeerRequested',
+  [SessionStatus.SelfRequested]: 'SelfRequested',
+  [SessionStatus.Killed]: 'Killed',
+  [SessionStatus.Saturated]: 'Saturated',
+};
 
 const copyOut = (a: Uint8Array): Uint8Array => new Uint8Array(a);
 const copyOutMany = (xs: Uint8Array[]): Uint8Array[] => xs.map(copyOut);
@@ -31,16 +43,59 @@ function freeWasm(value: { free(): void; __wbg_ptr?: number }): void {
   if (value.__wbg_ptr === undefined || value.__wbg_ptr !== 0) value.free();
 }
 
+/**
+ * The largest encrypted packet a client stores under a seeker (§13.10): the
+ * largest payload a phone relays over the mesh. The backend refuses more.
+ */
+export const SESSION_PACKET_MAX_BYTES = 65_536;
+
+/**
+ * The most the session layer adds to what it encrypts (§13.10: two ML-KEM-768
+ * ciphertexts, a fresh public key, a signed envelope and framing; measured
+ * against a group plaintext, the group message type included).
+ */
+export const SESSION_OVERHEAD_MAX_BYTES = 3_632;
+
+/**
+ * The largest session message handed to the session for encryption: one
+ * larger may not fit one packet once encrypted.
+ */
+export const SESSION_MESSAGE_MAX_BYTES =
+  SESSION_PACKET_MAX_BYTES - SESSION_OVERHEAD_MAX_BYTES;
+
+/**
+ * A session message refused before encryption because it may not fit one
+ * packet (`SESSION_MESSAGE_MAX_BYTES`). The session did not advance.
+ */
+export class SessionMessageTooLargeError extends Error {
+  constructor(readonly size: number) {
+    super(
+      `session:too-large: ${size} bytes, at most ${SESSION_MESSAGE_MAX_BYTES}`
+    );
+    this.name = 'SessionMessageTooLargeError';
+  }
+}
+
 export interface ReceivedMessage {
   message: Uint8Array;
   user_id: Uint8Array;
   timestamp: number;
   acknowledged_seekers: Uint8Array[];
+  /** Older than the configured age, or than the previous message: delayed in transit. */
+  stale: boolean;
 }
+
+/**
+ * A session configuration, or a function building one. WASM consumes a
+ * SessionConfig when it uses it, so only a function lets the module apply the
+ * same limits again to a manager restored from a blob.
+ */
+export type SessionConfigSource = SessionConfig | (() => SessionConfig);
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
+  private configFactory?: () => SessionConfig;
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -49,7 +104,7 @@ export class SessionModule {
   constructor(
     userKeys: UserKeys,
     onPersist?: () => Promise<void>,
-    config?: SessionConfig
+    config?: SessionConfigSource
   ) {
     let ourPk: UserPublicKeys | undefined;
     let ourSk: UserSecretKeys | undefined;
@@ -61,8 +116,15 @@ export class SessionModule {
       const userIdEncoded = encodeUserId(userId);
 
       // SessionManagerWrapper consumes the SessionConfig WASM wrapper.
+      // Without a factory, a caller-built config applies only to new managers.
+      this.configFactory =
+        typeof config === 'function'
+          ? config
+          : config
+            ? undefined
+            : () => SessionConfig.new_default();
       sessionManager = new SessionManagerWrapper(
-        config ?? SessionConfig.new_default()
+        typeof config === 'object' ? config : this.configFactory!()
       );
 
       this.ourPk = ourPk;
@@ -82,6 +144,55 @@ export class SessionModule {
   /**
    * Set the persistence callback
    */
+  /** The last status seen of each peer, by hex ID (debug log only). */
+  private seenStatus = new Map<string, number>();
+  /** When each peer entered the status last seen (debug log only). */
+  private seenSince = new Map<string, number>();
+
+  /**
+   * `session.state`: logs each change of a peer's session status, with the
+   * operation after which it was seen. Debug log only; never throws.
+   */
+  private observe(peerId: Uint8Array, why: string): void {
+    if (!debugLogEnabled() || !this.sessionManager) return;
+    try {
+      const status = this.sessionManager.peer_session_status(peerId);
+      const key = hex(peerId);
+      const before = this.seenStatus.get(key);
+      if (before === status) return;
+      this.seenStatus.set(key, status);
+      const now = Date.now();
+      const entered = this.seenSince.get(key);
+      this.seenSince.set(key, now);
+      dlog(
+        'sessions',
+        'session.state',
+        {
+          peer: shortId(peerId),
+          from: before === undefined ? null : STATUS_NAMES[before],
+          to: STATUS_NAMES[status] ?? status,
+          why,
+          inPreviousMs: entered === undefined ? null : now - entered,
+        },
+        { lvl: 'info' }
+      );
+    } catch {
+      // Only a log.
+    }
+  }
+
+  /** `observe` for every known peer. */
+  private observeAll(why: string): void {
+    if (!debugLogEnabled() || !this.sessionManager) return;
+    try {
+      for (const peer of this.sessionManager.peer_list()) {
+        this.observe(copyOut(peer), why);
+      }
+    } catch {
+      // Only a log.
+    }
+  }
+
   setOnPersist(callback: () => Promise<void>): void {
     this.onPersist = callback;
   }
@@ -94,7 +205,17 @@ export class SessionModule {
    */
   private async persistIfNeeded(): Promise<void> {
     if (this.onPersist) {
-      await this.onPersist!();
+      const started = performance.now();
+      try {
+        await this.onPersist!();
+      } catch (error) {
+        dlog('storage', 'session.persist.failed', errFields(error), {
+          lvl: 'error',
+          dur: since(started),
+        });
+        throw error;
+      }
+      dlog('storage', 'session.persist', {}, { dur: since(started) });
     }
   }
 
@@ -112,13 +233,50 @@ export class SessionModule {
   load(encryptedSession: Uint8Array, encryptionKey: EncryptionKey): void {
     // Clean up existing session if any
     this.cleanup();
+    const started = performance.now();
 
     try {
       this.sessionManager = SessionManagerWrapper.from_encrypted_blob(
         encryptedSession,
         encryptionKey
       );
+      // The blob carries the limits it was created with; apply the current ones.
+      if (this.configFactory) {
+        this.sessionManager.set_config(this.configFactory());
+      }
+      if (debugLogEnabled()) {
+        this.seenStatus.clear();
+        this.seenSince.clear();
+        dlog(
+          'sessions',
+          'session.load',
+          {
+            size: encryptedSession.length,
+            peers: this.sessionManager.peer_list().length,
+          },
+          { lvl: 'info', dur: since(started) }
+        );
+        this.observeAll('load');
+      }
     } catch (error) {
+      if (debugLogEnabled()) {
+        let key = '';
+        try {
+          key = hex(encryptionKey.to_bytes());
+        } catch {
+          // Only a log.
+        }
+        dlog(
+          'sessions',
+          'session.load.failed',
+          { size: encryptedSession.length, ...errFields(error) },
+          {
+            lvl: 'error',
+            dur: since(started),
+            s: { blob: hex(encryptedSession), storageKey: key },
+          }
+        );
+      }
       const message =
         error instanceof Error ? error.message : JSON.stringify(error);
       throw new Error(
@@ -174,6 +332,9 @@ export class SessionModule {
       )
     );
 
+    if (debugLogEnabled()) {
+      this.logAnnouncementOut(peerPk, result.length, false);
+    }
     if (result.length === 0) {
       throw new Error(
         'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
@@ -182,6 +343,101 @@ export class SessionModule {
 
     await this.persistIfNeeded();
     return result;
+  }
+
+  /** `announcement.out`: an announcement this account made for a peer. */
+  private logAnnouncementOut(
+    peerPk: UserPublicKeys,
+    size: number,
+    mailbox: boolean
+  ): void {
+    try {
+      const peer = copyOut(peerPk.derive_id());
+      dlog(
+        'sessions',
+        'announcement.out',
+        { peer: shortId(peer), size, mailbox },
+        { lvl: size === 0 ? 'error' : 'info' }
+      );
+      this.observe(peer, 'announce');
+    } catch {
+      // Only a log.
+    }
+  }
+
+  /**
+   * Like establishOutgoingSession, also returning the board entry that carries
+   * the announcement to a peer we already exchanged announcements with: post
+   * it like a message so a transport that cannot download the whole
+   * announcement board (a mesh) can still deliver it.
+   */
+  async establishOutgoingSessionAddressed(
+    peerPk: UserPublicKeys,
+    userData?: Uint8Array
+  ): Promise<{
+    announcement: Uint8Array;
+    mailbox?: { seeker: Uint8Array; data: Uint8Array };
+  }> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const result = this.sessionManager.establish_outgoing_session_addressed(
+      peerPk,
+      this.ourPk,
+      this.ourSk,
+      userData ?? new Uint8Array(0)
+    );
+    const announcement = copyOut(result.announcement);
+    const seeker = result.mailbox_seeker;
+    const data = result.mailbox_data;
+    result.free();
+    if (debugLogEnabled()) {
+      this.logAnnouncementOut(peerPk, announcement.length, !!(seeker && data));
+    }
+
+    if (announcement.length === 0) {
+      throw new Error(
+        'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
+      );
+    }
+
+    await this.persistIfNeeded();
+    return {
+      announcement,
+      mailbox:
+        seeker && data
+          ? { seeker: copyOut(seeker), data: copyOut(data) }
+          : undefined,
+    };
+  }
+
+  /** Seekers where peers would post their next announcement to us. */
+  getReannouncementMailboxKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_reannouncement_mailbox_keys());
+  }
+
+  /**
+   * The announcement carried by an entry read at a re-announcement mailbox,
+   * if it is signed by the mailbox key. Changes no state.
+   */
+  openReannouncementMailboxRead(
+    seeker: Uint8Array,
+    data: Uint8Array
+  ): Uint8Array | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const opened = this.sessionManager.open_reannouncement_mailbox_read(
+      seeker,
+      data
+    );
+    return opened ? copyOut(opened) : undefined;
   }
 
   /**
@@ -195,11 +451,39 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
+    const started = performance.now();
     const result = this.sessionManager.feed_incoming_announcement(
       announcementBytes,
       this.ourPk,
       this.ourSk
     );
+    if (debugLogEnabled()) {
+      try {
+        const peer = result
+          ? copyOut(result.announcer_public_keys.derive_id())
+          : undefined;
+        dlog(
+          'sessions',
+          'announcement.in',
+          {
+            size: announcementBytes.length,
+            accepted: !!result,
+            ...(peer && { peer: shortId(peer) }),
+            ...(result && {
+              timestamp: result.timestamp,
+              userData: result.user_data.length,
+            }),
+          },
+          {
+            dur: since(started),
+            c: { announcement: hex(announcementBytes) },
+          }
+        );
+        if (peer) this.observe(peer, 'announcement');
+      } catch {
+        // Only a log.
+      }
+    }
 
     if (result) {
       await this.persistIfNeeded();
@@ -216,6 +500,19 @@ export class SessionModule {
     }
 
     return copyOutMany(this.sessionManager.get_message_board_read_keys());
+  }
+
+  /**
+   * Seekers of the messages after the next one from each peer, for transports
+   * that request messages ahead of time (a mesh node's wanted list). Messages
+   * found there are read once getMessageBoardReadKeys() reaches their seeker.
+   */
+  getMessageBoardLookaheadKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_message_board_lookahead_keys());
   }
 
   /**
@@ -247,8 +544,18 @@ export class SessionModule {
       acknowledged_seekers: copyOutMany(
         result.acknowledged_seekers as Uint8Array[]
       ),
+      stale: result.stale,
     };
     result.free();
+    if (debugLogEnabled()) {
+      if (snapshot.stale) {
+        dlog('sessions', 'message.stale', {
+          from: shortId(snapshot.user_id),
+          seeker: shortId(seeker),
+        });
+      }
+      this.observe(snapshot.user_id, 'message');
+    }
 
     await this.persistIfNeeded();
     return snapshot;
@@ -258,6 +565,11 @@ export class SessionModule {
    * Send a message to a peer.
    * IMPORTANT: This persists session state before returning.
    * The returned output should only be sent to network AFTER this resolves.
+   *
+   * Encryption advances the session, so a message that may not fit one
+   * packet once encrypted is refused before it (§13.10): this throws a
+   * `SessionMessageTooLargeError` and the session is left as it was. This is
+   * the one place where anything is handed to the session for encryption.
    */
   async sendMessage(
     peerId: Uint8Array,
@@ -266,8 +578,26 @@ export class SessionModule {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
+    if (message.length > SESSION_MESSAGE_MAX_BYTES) {
+      throw new SessionMessageTooLargeError(message.length);
+    }
 
     const result = this.sessionManager.send_message(peerId, message);
+    if (debugLogEnabled()) {
+      dlog(
+        'sessions',
+        'session.send',
+        {
+          peer: shortId(peerId),
+          size: message.length,
+          ok: !!result,
+          ...(result && { seeker: shortId(result.seeker) }),
+          status: STATUS_NAMES[this.sessionManager.peer_session_status(peerId)],
+        },
+        { lvl: result ? 'debug' : 'warn' }
+      );
+      this.observe(peerId, 'send');
+    }
     // CRITICAL: Persist session state BEFORE returning
     // This ensures state is saved before the encrypted message goes on the network
     await this.persistIfNeeded();
@@ -299,12 +629,39 @@ export class SessionModule {
   /**
    * Discard a peer and all associated session state
    */
+  /**
+   * Timestamp (ms) of the latest announcement accepted from a peer, if any:
+   * kept when the peer is discarded, to refuse replays of older ones.
+   */
+  peerLatestIncomingAnnouncementTimestamp(
+    peerId: Uint8Array
+  ): number | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+    return this.sessionManager.peer_latest_incoming_announcement_timestamp(
+      peerId
+    );
+  }
+
   async peerDiscard(peerId: Uint8Array): Promise<void> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
 
+    if (debugLogEnabled()) {
+      this.observe(peerId, 'before-discard');
+      dlog(
+        'sessions',
+        'session.discard',
+        { peer: shortId(peerId) },
+        {
+          lvl: 'info',
+        }
+      );
+    }
     this.sessionManager.peer_discard(peerId);
+    if (debugLogEnabled()) this.observe(peerId, 'discard');
     await this.persistIfNeeded();
   }
 
@@ -316,7 +673,17 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
+    const started = performance.now();
     const result = copyOutMany(this.sessionManager.refresh());
+    if (debugLogEnabled()) {
+      dlog(
+        'sessions',
+        'session.refresh',
+        { keepAlive: result.length, keepAlivePeers: result.map(shortId) },
+        { dur: since(started) }
+      );
+      this.observeAll('refresh');
+    }
     await this.persistIfNeeded();
     return result;
   }

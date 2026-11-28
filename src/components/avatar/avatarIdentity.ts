@@ -33,3 +33,20 @@ export function getAvatarSurfaceClass(seed: string): string {
   const idx = hashIdentityString(s) % AVATAR_SURFACE_PALETTE.length;
   return AVATAR_SURFACE_PALETTE[idx];
 }
+
+/**
+ * One colour per member for the author's name (designer's screen 04), from
+ * the user ID, so that it is the same on every screen and every run.
+ */
+const NAME_COLORS = [
+  'text-[#7c3aed] dark:text-[#c4b5fd]',
+  'text-[#c2410c] dark:text-[#fdba74]',
+  'text-[#be123c] dark:text-[#fda4af]',
+  'text-[#0369a1] dark:text-[#7dd3fc]',
+  'text-[#047857] dark:text-[#6ee7b7]',
+  'text-[#a21caf] dark:text-[#f0abfc]',
+] as const;
+
+export function getAuthorNameClass(userId: string): string {
+  return NAME_COLORS[hashIdentityString(userId) % NAME_COLORS.length];
+}

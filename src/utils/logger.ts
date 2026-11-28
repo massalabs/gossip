@@ -7,9 +7,12 @@ import {
   type LogSink,
 } from '@massalabs/gossip-sdk/utils/logs.js';
 import { useDebugLogs } from '../stores/useDebugLogs';
+import { FULL_DEBUG } from '../config/fullDebug';
 
 const isDebugLoggingEnabled =
-  import.meta.env.DEV || import.meta.env.VITE_DEBUG_LOGS === 'true';
+  import.meta.env.DEV ||
+  import.meta.env.VITE_DEBUG_LOGS === 'true' ||
+  FULL_DEBUG;
 
 const browserConsoleSink: LogSink = (level, _message, args) => {
   if (level === 'debug') {

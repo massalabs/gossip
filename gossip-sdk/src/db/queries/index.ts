@@ -6,9 +6,13 @@ import { MessageQueries } from './messages.js';
 import { UserProfileQueries } from './userProfile.js';
 import { AnnouncementCursorQueries } from './announcementCursors.js';
 import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
+import { PendingEncryptedMessageQueries } from './pendingEncryptedMessages.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
 import { PrivateMigrationQueries } from './privateMigration.js';
 import { MessagingSessionRecoveryQueries } from './messagingSessionRecovery.js';
+import { DiscardedPeerQueries } from './discardedPeers.js';
+import { TransportCursorQueries } from './transportCursors.js';
+import { GroupQueries } from './groups.js';
 
 export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
@@ -17,7 +21,9 @@ export type { MessageRow, MessageInsert } from './messages.js';
 export type { UserProfileRow, UserProfileInsert } from './userProfile.js';
 export { rowToUserProfile, userProfileToRow } from './userProfile.js';
 export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
+export type { PendingEncryptedMessageRow } from './pendingEncryptedMessages.js';
 export type { PrivateMigrationStateV1 } from './privateMigration.js';
+export type { GroupBatch, GroupSnapshot, GroupOutboxRow } from './groups.js';
 
 /**
  * Bundle of all query classes, scoped to a single DatabaseConnection.
@@ -33,9 +39,13 @@ export class Queries {
   readonly userProfiles: UserProfileQueries;
   readonly announcementCursors: AnnouncementCursorQueries;
   readonly pendingAnnouncements: PendingAnnouncementQueries;
+  readonly pendingEncryptedMessages: PendingEncryptedMessageQueries;
   readonly activeSeekers: ActiveSeekerQueries;
   readonly privateMigration: PrivateMigrationQueries;
   readonly messagingSessionRecovery: MessagingSessionRecoveryQueries;
+  readonly discardedPeers: DiscardedPeerQueries;
+  readonly transportCursors: TransportCursorQueries;
+  readonly groups: GroupQueries;
 
   constructor(readonly conn: DatabaseConnection) {
     this.accountSettings = new AccountSettingsQueries(conn);
@@ -45,8 +55,12 @@ export class Queries {
     this.userProfiles = new UserProfileQueries(conn);
     this.announcementCursors = new AnnouncementCursorQueries(conn);
     this.pendingAnnouncements = new PendingAnnouncementQueries(conn);
+    this.pendingEncryptedMessages = new PendingEncryptedMessageQueries(conn);
     this.activeSeekers = new ActiveSeekerQueries(conn);
     this.privateMigration = new PrivateMigrationQueries(conn);
     this.messagingSessionRecovery = new MessagingSessionRecoveryQueries(conn);
+    this.discardedPeers = new DiscardedPeerQueries(conn);
+    this.transportCursors = new TransportCursorQueries(conn);
+    this.groups = new GroupQueries(conn);
   }
 }

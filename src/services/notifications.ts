@@ -15,6 +15,8 @@ import {
   LocalNotifications,
   type PermissionStatus as LocalNotificationPermissionStatus,
 } from '@capacitor/local-notifications';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { logPermission } from '../utils/debugPermissions';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
 const directNotifications = new Set<Notification>();
@@ -102,6 +104,7 @@ export class NotificationService {
     try {
       const status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
+      logPermission('permission.check', 'notifications', status.display);
 
       this.permission = {
         granted: status.display === 'granted',
@@ -260,15 +263,23 @@ export class NotificationService {
       // Ensure we have permission for native notifications
       let status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
+      logPermission('permission.check', 'notifications', status.display);
 
       if (
         status.display === 'prompt' ||
         status.display === 'prompt-with-rationale'
       ) {
+        logPermission('permission.request', 'notifications');
         status = await LocalNotifications.requestPermissions();
+        logPermission('permission.result', 'notifications', status.display);
       }
 
       if (status.display !== 'granted') {
+        dlog('app', 'notification.skipped', {
+          tag,
+          reason: 'permission',
+          permission: status.display,
+        });
         // Permission not granted, do not attempt to show native notification
         return;
       }
@@ -294,7 +305,24 @@ export class NotificationService {
           },
         ],
       });
+      dlog(
+        'app',
+        'notification.scheduled',
+        { id, tag, native: true },
+        { c: { title, body } }
+      );
     } catch (error) {
+      dlog(
+        'app',
+        'notification.failed',
+        {
+          tag,
+          native: this.isNativePlatform(),
+          err: error instanceof Error ? error.name : typeof error,
+          msg: error instanceof Error ? error.message : String(error),
+        },
+        { lvl: 'error' }
+      );
       // The `Notification` constructor doesn't exist in iOS/Android WebViews,
       // so the browser-based fallback would always throw on native platforms.
       // Only fall back when not running natively; otherwise just log.
@@ -347,9 +375,16 @@ export class NotificationService {
     });
 
     directNotifications.add(notification);
+    dlog(
+      'app',
+      'notification.shown',
+      { tag, native: false },
+      { c: { title, body } }
+    );
 
     // Handle notification click
     notification.onclick = () => {
+      dlog('app', 'notification.tapped', { tag, native: false });
       window.focus();
       if (onClick) {
         onClick();
@@ -375,12 +410,15 @@ export class NotificationService {
       try {
         let status: LocalNotificationPermissionStatus =
           await LocalNotifications.checkPermissions();
+        logPermission('permission.check', 'notifications', status.display);
 
         if (
           status.display === 'prompt' ||
           status.display === 'prompt-with-rationale'
         ) {
+          logPermission('permission.request', 'notifications');
           status = await LocalNotifications.requestPermissions();
+          logPermission('permission.result', 'notifications', status.display);
         }
 
         this.permission = {
@@ -408,8 +446,14 @@ export class NotificationService {
     }
 
     try {
+      logPermission('permission.request', 'notifications');
       await Notification.requestPermission();
       this.updatePermissionStatus();
+      logPermission(
+        'permission.result',
+        'notifications',
+        Notification.permission
+      );
       return this.permission;
     } catch (error) {
       logger.error('Failed to request notification permission:', error);
@@ -450,6 +494,36 @@ export class NotificationService {
       );
     } catch (error) {
       logger.error('Failed to show discussion notification:', error);
+    }
+  }
+
+  /**
+   * Show a notification for group activity (a message or an invitation).
+   * Generic copy only, and no group identifier in the tag or the URL: nothing
+   * about which group is exposed outside the app.
+   */
+  async showGroupNotification(): Promise<void> {
+    if (!this.canShowNotification()) {
+      return;
+    }
+
+    try {
+      await this.sendNotification(
+        'New message',
+        'You have a new message. Open the app to read it.',
+        'gossip-group',
+        3000,
+        () => {
+          window.location.href = '/discussions';
+        },
+        false,
+        {
+          type: 'discussion',
+          url: '/discussions',
+        }
+      );
+    } catch (error) {
+      logger.error('Failed to show group notification:', error);
     }
   }
 

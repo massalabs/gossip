@@ -1,0 +1,1 @@
+ALTER TABLE `discussions` ADD `seekerConflictRenewedAt` integer;

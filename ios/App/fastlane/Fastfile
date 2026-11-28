@@ -43,6 +43,11 @@ platform :ios do
       api_key: api_key   # Use API Key for authentication
     )
 
+    # Profile names as match installed them, not hardcoded: when a profile is recreated
+    # while the expired one still holds its name on the Dev Portal, match appends a
+    # suffix ("match AppStore net.massa.gossip 1795687704").
+    profiles = lane_context[SharedValues::MATCH_PROVISIONING_PROFILE_MAPPING]
+
     # Force manual signing for both targets using the appropriate App Store profiles
     # Main app target
     update_code_signing_settings(
@@ -50,7 +55,7 @@ platform :ios do
       path: "App.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
       targets: ["Gossip"],
-      profile_name: "match AppStore net.massa.gossip",
+      profile_name: profiles["net.massa.gossip"],
       code_sign_identity: "Apple Distribution",
       bundle_identifier: "net.massa.gossip"
     )
@@ -61,13 +66,29 @@ platform :ios do
       path: "App.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
       targets: ["GossipShareExtension"],
-      profile_name: "match AppStore net.massa.gossip.GossipShareExtension",
+      profile_name: profiles["net.massa.gossip.GossipShareExtension"],
       code_sign_identity: "Apple Distribution",
       bundle_identifier: "net.massa.gossip.GossipShareExtension"
     )
     
+    # Full debug build (GOSSIP_FULL_DEBUG=true, set by CI only when the
+    # full_debug input is ticked): compiles the record (Swift condition
+    # FULL_DEBUG, see App/DebugLogWriter.swift) into the Gossip target only,
+    # and names the app "Gossip DEBUG". Same bundle ID and signing: the
+    # profiles exist only for net.massa.gossip. Unset: unchanged build.
+    full_debug = ENV['GOSSIP_FULL_DEBUG'] == 'true'
+    if full_debug
+      UI.important("FULL DEBUG build: records everything, secrets included")
+      update_info_plist(
+        xcodeproj: "App.xcodeproj",
+        plist_path: "App/Info.plist",
+        display_name: "Gossip DEBUG"
+      )
+    end
+
     # Build the app with manual signing using Match certificates
     build_app(
+      xcargs: full_debug ? "GOSSIP_SWIFT_CONDITIONS=FULL_DEBUG" : nil,
       workspace: "App.xcworkspace",
       scheme: "Gossip",
       configuration: "Release",
@@ -77,10 +98,7 @@ platform :ios do
       clean: false,
       export_options: {
         method: "app-store",
-        provisioningProfiles: {
-          "net.massa.gossip" => "match AppStore net.massa.gossip",
-          "net.massa.gossip.GossipShareExtension" => "match AppStore net.massa.gossip.GossipShareExtension"
-        },
+        provisioningProfiles: profiles,
         teamID: ENV["APPLE_TEAM_ID"]
       }
     )

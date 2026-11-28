@@ -6,9 +6,9 @@ import {
 import {
   MessagingSessionRecoveryRequiredError,
   SecureStorageRecoveryRequiredError,
-  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import type { Account } from '@massalabs/massa-web3';
+import { clearAccountTraces } from '../../src/services/accountTraces';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
@@ -18,6 +18,7 @@ const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
 const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
 const encodeUserIdSpy = vi.hoisted(() => vi.fn(() => 'mock-user-id'));
 const resetAllAccountsSpy = vi.hoisted(() => vi.fn(async () => {}));
+const wipeMeshSpy = vi.hoisted(() => vi.fn(async () => {}));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -38,7 +39,9 @@ const makeSdkMock = () => ({
   polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
   getEncryptedSession: vi.fn(() => new Uint8Array([6, 6])),
   readSessionBlob: vi.fn(async () => null),
+  prefetchBulletinCounter: vi.fn(() => Promise.resolve('0')),
   persistSessionBlob: vi.fn(async () => {}),
+  rebuildMessagingSessions: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
   discussions: {
@@ -59,12 +62,21 @@ const makeSdkMock = () => ({
         formatVersion: 1 as const,
         installationEpoch,
         completedPhase: 0,
+        sessionReset: false,
       })),
+      beginCompleted: vi.fn(async (installationEpoch: string) => ({
+        formatVersion: 1 as const,
+        installationEpoch,
+        completedPhase: 5,
+        sessionReset: false,
+      })),
+      acknowledgeSessionReset: vi.fn(async () => {}),
       completePhase: vi.fn(
         async (installationEpoch: string, completedPhase: number) => ({
           formatVersion: 1 as const,
           installationEpoch,
           completedPhase,
+          sessionReset: false,
         })
       ),
     },
@@ -141,6 +153,11 @@ function mockProfile(session = new Uint8Array([9, 9])) {
 // Mock getSdk to avoid real SDK initialization
 vi.mock('../../src/services/unsupportedStorageReset', () => ({
   resetAllAccountStorage: resetAllAccountsSpy,
+}));
+
+vi.mock('../../src/services/meshNode', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/services/meshNode')>()),
+  wipeMesh: wipeMeshSpy,
 }));
 
 vi.mock('../../src/stores/sdkStore', () => ({
@@ -613,11 +630,6 @@ describe('AccountStore classic password discovery', () => {
       installationEpoch: '00112233445566778899aabbccddeeff',
       completedPhase: 3,
     });
-    sdk.queries.discussions.getByOwner.mockResolvedValue([
-      { weAccepted: true, contactUserId: 'accepted-contact' },
-      { weAccepted: false, contactUserId: 'pending-contact' },
-      { weAccepted: true, contactUserId: SELF_CONTACT_ID },
-    ]);
     getSdkMock.mockReturnValue(sdk);
     authSpy.mockResolvedValue({
       mnemonic: 'word '.repeat(24).trim(),
@@ -641,18 +653,293 @@ describe('AccountStore classic password discovery', () => {
         autoStartPolling: false,
       })
     );
-    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledOnce();
-    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledWith(
-      'accepted-contact',
-      expect.any(Uint8Array),
-      { resetQueue: false, triggerRefresh: false }
-    );
+    expect(sdk.rebuildMessagingSessions).toHaveBeenCalledOnce();
     expect(sdk.persistSessionBlob).toHaveBeenCalledWith(new Uint8Array([6, 6]));
     expect(sdk.profiles.save).toHaveBeenCalledWith(
       expect.objectContaining({ session: new Uint8Array(0) })
     );
     expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
     expect(sdk.polling.start).toHaveBeenCalledOnce();
+  });
+
+  /** A secure-storage account whose journal starts at `state`. */
+  function importedAccount(
+    state: { completedPhase: number; sessionReset: boolean },
+    epoch = '00112233445566778899aabbccddeeff'
+  ) {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.usesSessionBlobNamespace = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = epoch;
+    sdk.profiles.get.mockResolvedValue(mockProfile(new Uint8Array(0)));
+    sdk.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: epoch,
+      ...state,
+    });
+    sdk.queries.privateMigration.completePhase.mockImplementation(
+      async (installationEpoch: string, completedPhase: number) => ({
+        formatVersion: 1 as const,
+        installationEpoch,
+        completedPhase,
+        sessionReset: state.sessionReset,
+      })
+    );
+    return sdk;
+  }
+
+  async function unlock(sdk: ReturnType<typeof makeSdkMock>): Promise<void> {
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
+    });
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'account-password',
+      userId: 'mock-user-id',
+    });
+  }
+
+  it('gives up the sessions of an imported account at its first unlock, before anything is sent', async () => {
+    const sdk = importedAccount({ completedPhase: 0, sessionReset: true });
+    const copied = new Uint8Array([4, 4]);
+    sdk.readSessionBlob.mockResolvedValue(copied);
+    const order: string[] = [];
+    sdk.queries.messagingSessionRecovery.prepareReset.mockImplementation(
+      async () => {
+        order.push('prepare');
+      }
+    );
+    let onPersist: ((b: Uint8Array, k: unknown) => Promise<void>) | undefined;
+    sdk.openSession.mockImplementation(async (options: unknown) => {
+      order.push('open');
+      onPersist = (options as { onPersist: typeof onPersist }).onPersist;
+    });
+    sdk.rebuildMessagingSessions.mockImplementation(async () => {
+      order.push('rebuild');
+      // The rebuilt state is not persisted on the way.
+      await onPersist!(new Uint8Array([1]), {});
+    });
+    sdk.persistSessionBlob.mockImplementation(async () => {
+      order.push('persist');
+    });
+    sdk.polling.start.mockImplementation(() => {
+      order.push('poll');
+    });
+    sdk.startPublicKeyPublication.mockImplementation(() => {
+      order.push('publish');
+    });
+
+    await unlock(sdk);
+
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedSession: copied,
+        sessionReset: true,
+        publishPublicKey: false,
+        autoStartPolling: false,
+      })
+    );
+    expect(order).toEqual([
+      'prepare',
+      'open',
+      'rebuild',
+      'persist',
+      'publish',
+      'poll',
+    ]);
+    expect(sdk.persistSessionBlob).toHaveBeenCalledOnce();
+    expect(sdk.persistSessionBlob).toHaveBeenCalledWith(new Uint8Array([6, 6]));
+    expect(useAccountStore.getState().sessionsResetNotice).toBe(true);
+  });
+
+  it('gives up the sessions without asking when the copy holds none', async () => {
+    const sdk = importedAccount({ completedPhase: 3, sessionReset: true });
+    sdk.readSessionBlob.mockResolvedValue(null);
+
+    await unlock(sdk);
+
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedSession: undefined,
+        sessionReset: true,
+      })
+    );
+    expect(sdk.rebuildMessagingSessions).toHaveBeenCalledOnce();
+  });
+
+  it('gives up the sessions again after a crash before the journal moved on, and not after', async () => {
+    const crashed = importedAccount({ completedPhase: 3, sessionReset: true });
+    await unlock(crashed);
+    expect(
+      crashed.queries.messagingSessionRecovery.prepareReset
+    ).toHaveBeenCalledOnce();
+    expect(crashed.rebuildMessagingSessions).toHaveBeenCalledOnce();
+
+    const done = importedAccount({ completedPhase: 4, sessionReset: true });
+    done.readSessionBlob.mockResolvedValue(new Uint8Array([5]));
+    await unlock(done);
+    expect(
+      done.queries.messagingSessionRecovery.prepareReset
+    ).not.toHaveBeenCalled();
+    expect(done.rebuildMessagingSessions).not.toHaveBeenCalled();
+    expect(done.openSession).toHaveBeenCalledWith(
+      expect.not.objectContaining({ sessionReset: true })
+    );
+    // The user has not been told yet.
+    expect(useAccountStore.getState().sessionsResetNotice).toBe(true);
+  });
+
+  it('keeps the sessions of an account upgraded in place', async () => {
+    const sdk = importedAccount({ completedPhase: 0, sessionReset: false });
+    sdk.readSessionBlob.mockResolvedValue(new Uint8Array([5]));
+
+    await unlock(sdk);
+
+    expect(
+      sdk.queries.messagingSessionRecovery.prepareReset
+    ).not.toHaveBeenCalled();
+    expect(sdk.rebuildMessagingSessions).not.toHaveBeenCalled();
+    expect(useAccountStore.getState().sessionsResetNotice).toBe(false);
+  });
+
+  it('resets each account of an import at its own first unlock only', async () => {
+    const first = importedAccount({ completedPhase: 0, sessionReset: true });
+    const second = importedAccount({ completedPhase: 0, sessionReset: true });
+    await unlock(first);
+    expect(first.rebuildMessagingSessions).toHaveBeenCalledOnce();
+    expect(second.rebuildMessagingSessions).not.toHaveBeenCalled();
+    expect(
+      second.queries.messagingSessionRecovery.prepareReset
+    ).not.toHaveBeenCalled();
+    await unlock(second);
+    expect(second.rebuildMessagingSessions).toHaveBeenCalledOnce();
+    expect(first.rebuildMessagingSessions).toHaveBeenCalledOnce();
+  });
+
+  it('records the reset nowhere outside the account', async () => {
+    // Browser storage outside the account's slot: an unlock that resets
+    // touches it exactly as one that does not.
+    const traces = async (sessionReset: boolean) => {
+      const log: string[] = [];
+      const fake = (name: string) => {
+        const map = new Map([['unrelated', '1']]);
+        return {
+          getItem: (k: string) => map.get(k) ?? null,
+          setItem: (k: string, v: string) => {
+            log.push(`${name}.set ${k}`);
+            map.set(k, v);
+          },
+          removeItem: (k: string) => {
+            log.push(`${name}.remove ${k}`);
+            map.delete(k);
+          },
+          clear: () => {
+            log.push(`${name}.clear`);
+            map.clear();
+          },
+          key: (i: number) => [...map.keys()][i] ?? null,
+          get length() {
+            return map.size;
+          },
+        };
+      };
+      vi.stubGlobal('localStorage', fake('localStorage'));
+      vi.stubGlobal('sessionStorage', fake('sessionStorage'));
+      vi.stubGlobal('indexedDB', {
+        open: (name: string) => {
+          log.push(`indexedDB.open ${name}`);
+          throw new Error('not here');
+        },
+      });
+      try {
+        // The clearance of the last lock, which any unlock waits for.
+        await clearAccountTraces();
+        log.length = 0;
+        const sdk = importedAccount({ completedPhase: 0, sessionReset });
+        sdk.readSessionBlob.mockResolvedValue(new Uint8Array([5]));
+        await unlock(sdk);
+        // What the unlock started without waiting for it.
+        await new Promise(resolve => setTimeout(resolve, 50));
+        expect(sdk.rebuildMessagingSessions).toHaveBeenCalledTimes(
+          sessionReset ? 1 : 0
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      return log;
+    };
+    // What one unlock opens once per app run, whatever the account.
+    // What one unlock opens once per app run, whatever the account.
+    await traces(false);
+    const reset = await traces(true);
+    expect(reset).toEqual(await traces(false));
+  });
+
+  it('tells the user once, then clears the mark in the account', async () => {
+    const sdk = importedAccount({ completedPhase: 0, sessionReset: true });
+    await unlock(sdk);
+    expect(useAccountStore.getState().sessionsResetNotice).toBe(true);
+
+    await useAccountStore.getState().acknowledgeSessionsResetNotice();
+
+    expect(
+      sdk.queries.privateMigration.acknowledgeSessionReset
+    ).toHaveBeenCalledWith('00112233445566778899aabbccddeeff');
+    expect(useAccountStore.getState().sessionsResetNotice).toBe(false);
+  });
+
+  it('records the journal of a new account before letting the user in', async () => {
+    const sdk = importedAccount({ completedPhase: 0, sessionReset: false });
+    sdk.storageState = 'unlocked';
+    let release!: () => void;
+    sdk.queries.privateMigration.beginCompleted.mockImplementation(
+      async (installationEpoch: string) => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return {
+          formatVersion: 1 as const,
+          installationEpoch,
+          completedPhase: 5,
+          sessionReset: false,
+        };
+      }
+    );
+    getSdkMock.mockReturnValue(sdk);
+    let done = false;
+    const login = useAccountStore
+      .getState()
+      .loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+        fresh: {
+          mnemonic: 'word '.repeat(24).trim(),
+          encryptionKey: { type: 'mock-key' } as never,
+        },
+      })
+      .then(() => {
+        done = true;
+      });
+    await vi.waitFor(() =>
+      expect(sdk.queries.privateMigration.beginCompleted).toHaveBeenCalled()
+    );
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(done).toBe(false);
+    release();
+    await login;
+    expect(sdk.queries.privateMigration.begin).not.toHaveBeenCalled();
   });
 
   it('keeps migration failures locked before activation', async () => {
@@ -873,7 +1160,20 @@ describe('AccountStore session cleanup', () => {
   it('delegates resetAccount to the complete all-account wipe', async () => {
     await useAccountStore.getState().resetAccount();
 
+    expect(wipeMeshSpy).toHaveBeenCalledOnce();
     expect(resetAllAccountsSpy).toHaveBeenCalledOnce();
+  });
+
+  it('deletes no account when the mesh node could not be wiped', async () => {
+    resetAllAccountsSpy.mockClear();
+    wipeMeshSpy.mockRejectedValueOnce(new Error('could not be wiped'));
+
+    await expect(useAccountStore.getState().resetAccount()).rejects.toThrow(
+      'could not be wiped'
+    );
+
+    expect(resetAllAccountsSpy).not.toHaveBeenCalled();
+    expect(useAccountStore.getState().isLoading).toBe(false);
   });
 });
 

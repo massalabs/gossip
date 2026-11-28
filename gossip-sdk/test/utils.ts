@@ -192,6 +192,11 @@ export function cleanupTestSessions(sessions: TestSessionData[]): void {
  * Setup a discussion session between two SDK instances.
  * The first SDK initiates the discussion, the second accepts it.
  *
+ * By default the two discussions are then what an upgrade leaves of a
+ * one-to-one conversation from before group chats: archives, so that only
+ * the session is set up. With `asNewContact` they stay a new contact
+ * (§5.12): contacts with no chat, until either starts one.
+ *
  * @param initiatorSdk - SDK instance that will start the discussion
  * @param acceptorSdk - SDK instance that will accept the discussion
  * @param initiatorContactName - Name for the contact from initiator's perspective (default: 'Contact')
@@ -204,7 +209,8 @@ export async function setupSession(
   acceptorSdk: GossipSdk,
   initiatorContactName: string = 'Contact 1',
   acceptorContactName: string = 'Contact 2',
-  announcementMessage?: string
+  announcementMessage?: string,
+  options: { asNewContact?: boolean } = {}
 ): Promise<void> {
   // Create contacts for both sides
   await initiatorSdk.contacts.add(
@@ -250,6 +256,19 @@ export async function setupSession(
   const acceptResult = await acceptorSdk.discussions.accept(acceptorDiscussion);
   if (!acceptResult.success) {
     throw new Error(`Failed to accept discussion: ${acceptResult.error}`);
+  }
+
+  if (!options.asNewContact) {
+    for (const [sdk, peer] of [
+      [initiatorSdk, acceptorSdk],
+      [acceptorSdk, initiatorSdk],
+    ] as const) {
+      await sdk.queries.discussions.updateByOwnerAndContact(
+        sdk.userId,
+        peer.userId,
+        { isArchive: true }
+      );
+    }
   }
 
   // Initiator fetches acceptor's acceptance

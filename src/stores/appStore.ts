@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { NetworkName, Provider } from '@massalabs/massa-web3';
 import { createSelectors } from './utils/createSelectors';
+import { FULL_DEBUG } from '../config/fullDebug';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { ParsedInvite } from '../utils/invite';
 import { mnsService } from '../services/mns';
@@ -102,7 +103,8 @@ const useAppStoreBase = create<AppStoreState>()(
         set({ networkName });
       },
       // Debug options visibility
-      showDebugOption: false,
+      // The full debug build shows the debug menu without the 7 taps.
+      showDebugOption: FULL_DEBUG,
       setShowDebugOption: (show: boolean) => {
         set({ showDebugOption: show });
       },
@@ -113,7 +115,8 @@ const useAppStoreBase = create<AppStoreState>()(
         set({ debugOverlayVisible: visible });
       },
       // Native screenshot protection (off by default)
-      disableNativeScreenshot: false,
+      // The full debug build lets testers take screenshots for their reports.
+      disableNativeScreenshot: FULL_DEBUG,
       setDisableNativeScreenshot: (disabled: boolean) => {
         set({ disableNativeScreenshot: disabled });
       },
@@ -223,8 +226,8 @@ const useAppStoreBase = create<AppStoreState>()(
           mnsDomains: [],
         }));
       },
-      // Auto-lock timeout (disabled by default)
-      autoLockTimeout: null,
+      // Auto-lock timeout: 5 minutes by default (a choice saved before stays)
+      autoLockTimeout: 300,
       setAutoLockTimeout: (timeout: number | null) => {
         set({ autoLockTimeout: timeout });
       },

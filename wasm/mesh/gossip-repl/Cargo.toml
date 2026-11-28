@@ -1,0 +1,35 @@
+[package]
+name = "gossip-repl"
+version.workspace = true
+edition = "2021"
+rust-version = "1.98"
+license.workspace = true
+description = "Gossip P2P backend: blob replication (announce / ask / deliver, anti-entropy) over any link"
+
+[dependencies]
+gossip-wire = { workspace = true }
+gossip-trust = { workspace = true }
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+massa_serialization = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true }
+rand = { workspace = true }
+crossbeam = { workspace = true }
+parking_lot = { workspace = true }
+schnellru = { workspace = true }
+static_assertions = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+# No log line in a release build (privacy rule): `quiet-release` compiles every
+# `tracing` line out of the release profile. Only the full-debug build of the app
+# leaves it out (`--no-default-features --features full-debug` on gossip-mobile).
+default = ["quiet-release"]
+quiet-release = ["tracing/release_max_level_off", "gossip-trust/quiet-release"]
+full-debug = ["gossip-trust/full-debug"]
+
+[dev-dependencies]
+mockall = { workspace = true }

@@ -35,7 +35,7 @@ const sdk = gossipSdk;
 
 // 1. Initialize (optional config)
 await sdk.init({
-  // protocolBaseUrl: 'https://api.usegossip.com', // optional, otherwise env/default is used
+  // protocolBaseUrl: 'https://api.usegossip.com/v2/api', // optional, otherwise env/default is used
   // storage: { type: 'idb', name: 'gossip-db' }, // optional, defaults to in-memory
 });
 
@@ -73,12 +73,12 @@ await sdk.closeSession();
 Call `init()` once at app startup on your SDK instance (either the `gossipSdk` singleton or an instance of `GossipSdk`). All options inside the `GossipSdkInitOptions` object are optional:
 
 ```typescript
-// Uses VITE_GOSSIP_API_URL / GOSSIP_API_URL env vars, or defaults to https://api.usegossip.com/api
+// Uses VITE_GOSSIP_API_URL / GOSSIP_API_URL env vars, or defaults to https://api.usegossip.com/v2/api
 await sdk.init({});
 
 // Or with explicit config
 await sdk.init({
-  protocolBaseUrl: 'https://api.usegossip.com/api',
+  protocolBaseUrl: 'https://api.usegossip.com/v2/api',
   config: {
     polling: {
       enabled: true,
@@ -194,14 +194,24 @@ await sdk.messages.markAsRead(messageId);
 ### Discussions
 
 ```typescript
-// Start a new discussion
+// Send a contact request (it starts no chat)
 const result = await sdk.discussions.startByUserId(contactUserId, 'Alice', {
   username: 'Alice',
   message: 'Hi!',
 });
 
-// Accept an incoming discussion request
+// Accept an incoming contact request (it starts no chat either)
 await sdk.discussions.accept(discussion);
+
+// Start the chat with a contact, explicitly: this device owns it, and the
+// other person receives an ordinary invitation showing its message timer.
+const groupId = await sdk.conversations.startDirectChat(contactUserId, {
+  messageTimer: 24 * 60 * 60_000,
+});
+
+// The other person's side: the invitation waiting, then accepted.
+const invitation = await sdk.conversations.directChatInvitation(peerUserId);
+if (invitation) await sdk.conversations.acceptInvitation(invitation.epochId);
 
 // Renew a broken session
 await sdk.discussions.renew(contactUserId);
@@ -233,6 +243,40 @@ await sdk.contacts.updateName(contactUserId, 'Alice Smith');
 
 // Delete contact and all associated data
 await sdk.contacts.delete(contactUserId);
+
+// A member of a shared chat who is no contact (connection 'automatic', or
+// 'requested' while their own contact request waits): add them as a contact
+// on this device only. Nothing is sent. The contact stays 'added' (not
+// declared to the engine, its connection kept by the automatic rule) until
+// the relationship is mutual, then 'accepted'.
+const added = await sdk.conversations.addAsContact(contactUserId, 'Alice');
+
+// Decline a contact request. A member of a shared chat keeps the connection
+// the chat needs; anyone else goes with their contact. Nothing is sent.
+await sdk.conversations.declineContactRequest(contactUserId);
+
+// A contact added on this device only ('added') whose connection lapsed (no
+// session, no shared chat): send it an ORDINARY contact request, the one a
+// first-time request with the same inputs is, with nothing that says the
+// contact existed already. The contact keeps its name, becomes 'accepted',
+// and is declared to the engine once the other person accepts.
+const sent = await sdk.conversations.sendContactRequest(contactUserId, {
+  username: 'Alice',
+  message: 'Hi again!',
+});
+```
+
+### Chat names
+
+```typescript
+// The user's own name for a chat: a device-only field (`local_name`) beside
+// the roots. The root, which holds the shared name and is hashed, is never
+// changed by it. null clears it.
+await sdk.groups.setLocalName(groupId, 'Family');
+
+// When the owner saves a shared name for everyone, the app also clears the
+// owner's own name, so that the owner sees what they typed.
+await sdk.groups.setLocalName(groupId, null);
 ```
 
 ### Announcements
@@ -337,7 +381,7 @@ Full configuration options with defaults:
 await sdk.init({
   config: {
     protocol: {
-      baseUrl: 'https://api.usegossip.com', // optional; if omitted, env/default is used
+      baseUrl: 'https://api.usegossip.com/v2/api', // optional; if omitted, env/default is used
       timeout: 10000,
       retryAttempts: 3,
     },

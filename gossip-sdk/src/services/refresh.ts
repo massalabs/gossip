@@ -24,6 +24,8 @@ import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { SdkConfig } from '../config/sdk.js';
 import * as schema from '../db/schema/index.js';
 import { SELF_CONTACT_ID } from './selfMessage.js';
+import { dlog } from '../utils/debugLog.js';
+import { errFields, shortId, since } from '../utils/debugFields.js';
 
 const logger = new Logger('RefreshService');
 
@@ -54,6 +56,8 @@ export class RefreshService {
   private queries: Queries;
   private config: SdkConfig;
   private sessionStatusMap: Map<string, SessionStatus> = new Map();
+  /** When a keep-alive was last queued for each peer while only a mesh was reachable. */
+  private meshKeepAliveAt: Map<string, number> = new Map();
 
   constructor(
     messageService: MessageService,
@@ -95,6 +99,16 @@ export class RefreshService {
       const previous = this.sessionStatusMap.get(discussion.contactUserId);
 
       if (previous !== status) {
+        dlog(
+          'sessions',
+          'session.status.reported',
+          {
+            peer: shortId(discussion.contactUserId),
+            from: previous ?? null,
+            to: status,
+          },
+          { lvl: 'info' }
+        );
         this.sessionStatusMap.set(discussion.contactUserId, status);
         this.eventEmitter.emit(SdkEventType.SESSION_STATUS_CHANGED, {
           contactUserId: discussion.contactUserId,
@@ -144,6 +158,10 @@ export class RefreshService {
     }
 
     this.isUpdating = true;
+    const started = performance.now();
+    let discarded = 0;
+    let keepAlives = 0;
+    let sendable = 0;
     try {
       if (!ownerUserId) {
         log.error('ownerUserId is empty, skipping update_state');
@@ -173,6 +191,13 @@ export class RefreshService {
         const encoded = encodeUserId(peerId);
         if (!discussionPeerIds.has(encoded)) {
           await this.session.peerDiscard(peerId);
+          discarded++;
+          dlog(
+            'sessions',
+            'session.orphan.discarded',
+            { peer: shortId(peerId) },
+            { lvl: 'warn' }
+          );
           log.info('discarded orphaned session peer', {
             contactUserId: encoded,
           });
@@ -182,6 +207,7 @@ export class RefreshService {
       // Step 1: refresh sessions and create_session for lost sessions
       const refreshResult = await this.session.refresh();
       const keepAlivePeerIds = refreshResult.map(peer => encodeUserId(peer));
+      keepAlives = keepAlivePeerIds.length;
 
       for (const discussion of discussions) {
         if (discussion.contactUserId === SELF_CONTACT_ID) {
@@ -228,6 +254,7 @@ export class RefreshService {
             )
           )
       );
+      sendable = activeEstablishedDiscussions.length;
       const keepAliveSet = new Set(keepAlivePeerIds);
       for (const discussion of activeEstablishedDiscussions) {
         if (discussion.contactUserId === SELF_CONTACT_ID) {
@@ -240,7 +267,8 @@ export class RefreshService {
           keepAliveSet.has(discussion.contactUserId) &&
           this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
-          ) === SessionStatus.Active
+          ) === SessionStatus.Active &&
+          this.keepAliveAllowed(discussion.contactUserId)
         ) {
           // Send keep alive message only if no messages are pending
           const pendingCount = await this.messageService.getPendingSendCount(
@@ -276,13 +304,54 @@ export class RefreshService {
           });
         }
       }
-      // Step 4: hard-delete messages that have exceeded retention duration
+      // Step 4: post to a server what only a mesh took
+      await this.messageService.repostMeshOnly();
+
+      // Step 5: hard-delete messages that have exceeded retention duration
       await this.messageService.deleteExpiredMessages(ownerUserId);
+      dlog(
+        'sdk',
+        'sync.state_update',
+        {
+          discussions: discussions.length,
+          discarded,
+          keepAlives,
+          sendable,
+        },
+        { dur: since(started) }
+      );
     } catch (error) {
       log.error('error in update_state', { error });
+      dlog(
+        'sdk',
+        'sync.state_update.failed',
+        { discarded, keepAlives, ...errFields(error) },
+        { lvl: 'error', dur: since(started) }
+      );
     } finally {
       this.isUpdating = false;
     }
+  }
+
+  /**
+   * Over a mesh only, keep-alives are spaced out: the session asks for one
+   * every day, and after each message it misses acknowledgements for.
+   */
+  private keepAliveAllowed(contactUserId: string): boolean {
+    if (this.messageService.getConnectivity() !== 'mesh-only') {
+      this.meshKeepAliveAt.delete(contactUserId);
+      return true;
+    }
+    const now = Date.now();
+    const last = this.meshKeepAliveAt.get(contactUserId);
+    if (
+      last !== undefined &&
+      now - last < this.config.messages.meshKeepAliveIntervalMs
+    ) {
+      return false;
+    }
+    this.meshKeepAliveAt.set(contactUserId, now);
+    return true;
   }
 
   private getJitteredDelayMs(baseMs: number, jitterMs: number): number {

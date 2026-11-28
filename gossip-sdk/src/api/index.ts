@@ -1,5 +1,27 @@
 export {
   restMessageProtocol,
   RestMessageProtocol,
+  CompositeMessageProtocol,
+  MeshNodeProtocol,
+  type CompositeTransport,
+  type TransportKind,
+  type MeshBlobKind,
+  type MeshNodeArrival,
+  type MeshNodePlugin,
+  type MeshNodeStatus,
   type EncryptedMessage,
+  type IMessageProtocol,
+  type BulletinItem,
+  type TransportConnectivity,
+  type MessageRouting,
+  type SendOutcome,
+  type SettledSend,
 } from './messageProtocol/index.js';
+export {
+  BackendPausedError,
+  HttpStatusError,
+  NetworkError,
+  TransportsFailedError,
+  isSeekerConflict,
+  type TransportFailure,
+} from './errors.js';

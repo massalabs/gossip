@@ -36,6 +36,11 @@ vi.mock('@capacitor/core', () => ({
   },
 }));
 
+// The rekey form pulls in native biometric plugins; it has its own coverage.
+vi.mock('../../../src/components/settings/RekeyForm', () => ({
+  default: () => null,
+}));
+
 vi.mock('../../../src/stores/appStore', () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({

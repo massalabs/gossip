@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { MessageDirection, MessageStatus, MessageType } from '../../src/db/db';
 import {
   activeSeekers,
+  groupOutbox,
   messages,
   pendingAnnouncements,
   pendingEncryptedMessages,
@@ -57,6 +58,13 @@ describe('MessagingSessionRecoveryQueries', () => {
       ciphertext: new Uint8Array([3]),
       fetchedAt: new Date(2),
     });
+    await db.insert(groupOutbox).values({
+      ownerUserId: 'owner',
+      contactUserId: 'contact',
+      seeker: new Uint8Array([10]),
+      ciphertext: new Uint8Array([11]),
+      whenToSend: new Date(4),
+    });
     await db.insert(pendingAnnouncements).values({
       announcement: new Uint8Array([4]),
       fetchedAt: new Date(3),
@@ -91,6 +99,9 @@ describe('MessagingSessionRecoveryQueries', () => {
     await expect(
       db.select().from(pendingEncryptedMessages).all()
     ).resolves.toEqual([]);
+    // Group ciphertexts were encrypted on the sessions given up: the engine
+    // keeps its events and sends their content again on the new ones.
+    await expect(db.select().from(groupOutbox).all()).resolves.toEqual([]);
     await expect(
       db.select().from(pendingAnnouncements).all()
     ).resolves.toHaveLength(1);

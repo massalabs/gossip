@@ -4,6 +4,7 @@ import { AlertTriangle } from 'react-feather';
 import { GroupChatGraphic } from '../graphics';
 import Button from './Button';
 import i18n from '../../i18n';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 
 interface Props {
   children: ReactNode;
@@ -25,6 +26,13 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     logger.error('ErrorBoundary caught an error:', error, errorInfo);
+    // Full debug build only (no-op elsewhere): the error screen as a crash.
+    dlog(
+      'ui',
+      'crash.error_boundary',
+      { error, componentStack: errorInfo.componentStack },
+      { lvl: 'error' }
+    );
   }
 
   public render() {

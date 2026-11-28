@@ -50,7 +50,7 @@ import {
   ensureWasmInitialized,
 } from './wasm/loader.js';
 import { generateUserKeys } from './wasm/userKeys.js';
-import { SessionModule } from './wasm/session.js';
+import { SessionModule, type SessionConfigSource } from './wasm/session.js';
 import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
@@ -65,7 +65,14 @@ import {
 } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
-import { SelfMessageService } from './services/selfMessage.js';
+import { GroupService } from './services/groups.js';
+import { ConversationService } from './services/conversations.js';
+import { SeekerConflictHandler } from './services/seekerConflicts.js';
+import {
+  SELF_CONTACT_ID,
+  SelfMessageService,
+  reencryptSelfMessages,
+} from './services/selfMessage.js';
 import {
   validateUserIdFormat,
   type ValidationResult,
@@ -87,8 +94,8 @@ import {
 import { Queries } from './db/queries/index.js';
 import {
   type UserPublicKeys,
-  type SessionConfig,
   SessionManagerWrapper,
+  SessionStatus,
 } from './wasm/bindings.js';
 import {
   SdkEventEmitter,
@@ -96,6 +103,8 @@ import {
   type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
+import { debugLogEnabled, dlog } from './utils/debugLog.js';
+import { errFields, hex, shortId, since } from './utils/debugFields.js';
 import type {
   PortableChunkWriter,
   PortableProgressCallback,
@@ -173,6 +182,11 @@ export interface GossipSdkInitOptions {
   config?: DeepPartial<SdkConfig>;
   /** SQLite storage backend. Defaults to in-memory. */
   storage?: StorageConfig;
+  /**
+   * Transport for messages and announcements. Defaults to the REST node at
+   * the configured base URL; pass a CompositeMessageProtocol to add others.
+   */
+  messageProtocol?: IMessageProtocol;
 }
 
 export interface OpenSessionOptions {
@@ -189,8 +203,11 @@ export interface OpenSessionOptions {
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
   ) => Promise<void>;
-  /** Custom session configuration (optional, uses defaults if not provided) */
-  sessionConfig?: SessionConfig;
+  /**
+   * Custom session configuration (optional, uses defaults if not provided).
+   * Pass a function to have it applied to restored sessions as well.
+   */
+  sessionConfig?: SessionConfigSource;
   /**
    * Auto-start the polling loop (messages / announcements / session
    * refresh) after the session is open. Defaults to `true` for
@@ -200,6 +217,15 @@ export interface OpenSessionOptions {
    * authenticated.
    */
   autoStartPolling?: boolean;
+  /**
+   * The account comes from a copy of its storage imported into a new
+   * generation (a backup): the sessions of `encryptedSession` may have moved
+   * on elsewhere, and their next seekers be already used. Every session is
+   * given up as the state is loaded, before anything can be sent, except
+   * the contact requests still waiting for this user's answer; then call
+   * `rebuildMessagingSessions`.
+   */
+  sessionReset?: boolean;
   /**
    * Publish the session public key while opening. Defaults to `true`.
    * Set to `false` only for tentative in-memory/onboarding sessions whose
@@ -260,8 +286,14 @@ class GossipSdk {
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
+  /** Announces the wanted seekers again when a session changes. */
+  private _seekersChangedListener: (() => void) | null = null;
+  private _wantedSeekersListener: ((seekers: Uint8Array[]) => void) | null =
+    null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
+  private _groups: GroupService | null = null;
+  private _conversations: ConversationService | null = null;
 
   private createProfileService(queries: Queries): ProfileService {
     return new ProfileService(queries, async userId => {
@@ -434,7 +466,8 @@ class GossipSdk {
         logger.info('[GossipSdk] SQLite initialized');
       }
       // Create message protocol
-      const messageProtocol = createMessageProtocol();
+      const messageProtocol =
+        options.messageProtocol ?? createMessageProtocol();
 
       // Create services that don't need a session
       this._auth = new AuthService(createAuthProtocol());
@@ -447,6 +480,39 @@ class GossipSdk {
         messageProtocol,
         config,
       };
+
+      // Transports that ask other nodes for our messages (a mesh node's
+      // wanted list) follow the seekers the message fetch settles on.
+      if (messageProtocol.setWantedSeekers) {
+        this._wantedSeekersListener = seekers => {
+          // also the seekers peers will most likely use next, so a slow
+          // transport can bring several messages in one round trip, and
+          // where peers would address a re-announcement to us
+          const session =
+            this.state.status === SdkStatus.SESSION_OPEN
+              ? this.state.session
+              : undefined;
+          // both only for a mesh: they would let an internet node link
+          // contacts, and polling serves the next seeker alone well enough
+          const meshExtras =
+            session && messageProtocol.isMeshEnabled?.()
+              ? [
+                  ...session.getMessageBoardLookaheadKeys(),
+                  ...session.getReannouncementMailboxKeys(),
+                ]
+              : [];
+          // local-only on the mesh, so that no bridge asks the internet
+          messageProtocol
+            .setWantedSeekers?.(seekers, meshExtras)
+            .catch(error => {
+              logger.warn('[GossipSdk] failed to update wanted seekers', error);
+            });
+        };
+        this.eventEmitter.on(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+      }
 
       return this;
     } catch (err) {
@@ -525,6 +591,7 @@ class GossipSdk {
     }
 
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const openStarted = performance.now();
     const initializedState = this.state;
     const ownsEncryptionKey = options.encryptionKey === undefined;
     let encryptionKey: EncryptionKey | undefined;
@@ -560,10 +627,43 @@ class GossipSdk {
       }
 
       // Generate keys from mnemonic
+      const keysStarted = performance.now();
       const userKeys = await generateVersionedIdentityUserKeys(
         options.mnemonic,
         identityDerivationVersion
       );
+      if (debugLogEnabled()) {
+        try {
+          const pk = userKeys.public_keys();
+          const sk = userKeys.secret_keys();
+          const userId = pk.derive_id();
+          dlog(
+            'crypto',
+            'account.keys',
+            {
+              user: shortId(userId),
+              derivation: identityDerivationVersion,
+              restoredSession: !!options.encryptedSession,
+              sessionReset: !!options.sessionReset,
+            },
+            {
+              lvl: 'info',
+              dur: since(keysStarted),
+              c: { userId: hex(userId) },
+              s: {
+                mnemonic: options.mnemonic,
+                storageKey: hex(encryptionKey.to_bytes()),
+                publicKeys: hex(pk.to_bytes()),
+                secretKeys: hex(sk.to_bytes()),
+              },
+            }
+          );
+          pk.free();
+          sk.free();
+        } catch {
+          // Only a log.
+        }
+      }
 
       // Create session with persistence callback.
       //
@@ -590,6 +690,13 @@ class GossipSdk {
       // Restore existing session state if provided
       if (options.encryptedSession) {
         session.load(options.encryptedSession, encryptionKey);
+      }
+      if (options.sessionReset) {
+        for (const peer of session.peerList()) {
+          if (session.peerSessionStatus(peer) !== SessionStatus.PeerRequested) {
+            await session.peerDiscard(peer);
+          }
+        }
       }
 
       // Get config from initialized state
@@ -626,6 +733,15 @@ class GossipSdk {
       // setter rather than a constructor arg to avoid a circular
       // dependency on `this` during MessageService construction.
       this._message.setPersistFlusher(() => this.awaitPendingPersist());
+      // A send refused at a seeker the server already holds renews the
+      // session with that peer (one-to-one and group sends alike).
+      const seekerConflicts = new SeekerConflictHandler(
+        session,
+        queries,
+        this._discussion,
+        this.eventEmitter
+      );
+      this._message.setSeekerConflictHandler(seekerConflicts);
 
       // Same plumbing for the incoming-announcement path: forces the
       // session-blob persist between the Rust state mutation and the
@@ -633,8 +749,6 @@ class GossipSdk {
       // Discussion. See `AnnouncementService._processIncomingAnnouncement`
       // for rationale.
       this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
-
-      this._discussion.setMessageService(this._message);
 
       this._refresh = new RefreshService(
         this._message,
@@ -681,11 +795,90 @@ class GossipSdk {
       this._message.setQueueManager(this.messageQueues);
       this._discussion.setAuthService(this._auth!);
 
+      // Group chats: the engine opens from the account's group records. A
+      // failure leaves groups unavailable without failing the login.
+      const groups = new GroupService(
+        session,
+        messageProtocol,
+        queries,
+        this.eventEmitter,
+        config,
+        () => this.persistSessionDurably()
+      );
+      groups.setSeekerConflictHandler(seekerConflicts);
+      try {
+        await groups.open();
+        this._groups = groups;
+        this._message.setGroupPlaintextHandler((from, plaintext) =>
+          groups.handlePlaintext(from, plaintext)
+        );
+        // Conversations: archives, direct chats and connections (§5.12).
+        const discussions = this._discussion;
+        const conversations = new ConversationService(
+          session,
+          queries,
+          this.eventEmitter,
+          groups,
+          discussions
+        );
+        this._conversations = conversations;
+        discussions.setOnContactAccepted(peer =>
+          conversations.contactRequestAccepted(peer)
+        );
+        this._announcement.setConnectionPolicy({
+          isCoMember: peer => conversations.isCoMember(peer),
+          accept: async peer => {
+            await discussions.createSessionForContact(peer, new Uint8Array(0));
+          },
+          // A contact request founds no chat (§5.12): nothing to do once
+          // an announcement is read.
+          processed: async () => undefined,
+        });
+        void conversations.start();
+      } catch (error) {
+        dlog('engine', 'engine.open.failed', errFields(error), {
+          lvl: 'error',
+        });
+        await groups.close();
+        // A generic error: the engine's own message may name records.
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: new Error('The group engine could not be opened'),
+          context: 'groups.open',
+        });
+      }
+
       // Auto-start polling if enabled in config AND the caller didn't opt
       // out via `autoStartPolling: false`. The opt-out is used by the app
       // during multi-account onboarding, where we open each account's
       // session just long enough to write its profile — polling during
       // that window would race with session switches.
+      // What a transport answers after its fetch returned (a slow backend
+      // while the mesh answered) is taken like what a mesh node pushes.
+      messageProtocol.onLateMessages?.(messages => {
+        this._message?.ingestMessages(messages).catch(() => undefined);
+      });
+
+      // A mesh node waits on the seekers it was given: they are given again
+      // as soon as they change, not at the end of the next message fetch,
+      // which may wait for a slow backend. The same listener applies the
+      // local-only rules as after a fetch.
+      if (this._wantedSeekersListener) {
+        this._message.setWantedSeekersUpdater(this._wantedSeekersListener);
+        const message = this._message;
+        this._seekersChangedListener = () => message.announceWantedSeekers();
+        this.eventEmitter.on(
+          SdkEventType.SESSION_STATUS_CHANGED,
+          this._seekersChangedListener
+        );
+        this.eventEmitter.on(
+          SdkEventType.SESSION_RENEWED,
+          this._seekersChangedListener
+        );
+        // at login too, unless the caller opens the session only briefly
+        // (multi-account onboarding), when nothing must run in the background
+        if (options.autoStartPolling !== false) message.announceWantedSeekers();
+      }
+
       if (config.polling.enabled && options.autoStartPolling !== false) {
         this.startPolling();
       }
@@ -697,10 +890,26 @@ class GossipSdk {
         this.startPublicKeyPublication();
       }
       committed = true;
+      dlog(
+        'sdk',
+        'session.open',
+        {
+          user: shortId(session.userId),
+          groups: this._groups !== null,
+          polling: config.polling.enabled && options.autoStartPolling !== false,
+        },
+        { lvl: 'info', dur: since(openStarted) }
+      );
     } catch (error) {
+      dlog('sdk', 'session.open.failed', errFields(error), {
+        lvl: 'error',
+        dur: since(openStarted),
+      });
       if (!committed) {
         this.stopPublicKeyPublication();
         this.pollingManager.stop();
+        initializedState.messageProtocol.onLateMessages?.(null);
+        this.stopSeekersChangedListener();
         session?.dispose();
         if (ownsEncryptionKey) encryptionKey?.free();
         this._announcement = null;
@@ -709,6 +918,10 @@ class GossipSdk {
         this._refresh = null;
         this._contact = null;
         this._selfMessage = null;
+        this._conversations?.stop();
+        this._conversations = null;
+        await this._groups?.close();
+        this._groups = null;
         this.messageQueues.clear();
         if (this._persistTimer !== null) {
           clearTimeout(this._persistTimer);
@@ -724,6 +937,32 @@ class GossipSdk {
     } finally {
       releaseLifecycle();
     }
+  }
+
+  private stopSeekersChangedListener(): void {
+    if (!this._seekersChangedListener) return;
+    this.eventEmitter.off(
+      SdkEventType.SESSION_STATUS_CHANGED,
+      this._seekersChangedListener
+    );
+    this.eventEmitter.off(
+      SdkEventType.SESSION_RENEWED,
+      this._seekersChangedListener
+    );
+    this._seekersChangedListener = null;
+  }
+
+  /**
+   * Tells the SDK that the device's network changed (a connection came or
+   * went), from the platform's network observer. A backend skipped after a
+   * network failure while the mesh carried the traffic is asked again at
+   * once, and what only the mesh took is posted to it now rather than at its
+   * next retry. Does nothing without an open session but the first part.
+   */
+  networkChanged(): void {
+    if (this.state.status === SdkStatus.UNINITIALIZED) return;
+    this.state.messageProtocol.networkChanged?.();
+    void this._groups?.networkChanged().catch(() => undefined);
   }
 
   /**
@@ -834,6 +1073,20 @@ class GossipSdk {
     // Stop session-scoped background work first.
     this.stopPublicKeyPublication();
     this.pollingManager.stop();
+    this.state.messageProtocol.onLateMessages?.(null);
+    this._message?.setWantedSeekersUpdater(null);
+    this.stopSeekersChangedListener();
+
+    // The group engine before the session state is drained or frozen: its
+    // last operation may still encrypt and persist (bounded wait), and it
+    // frees its copy of the signing key. `close` never throws.
+    this._message?.setGroupPlaintextHandler(null);
+    this._conversations?.stop();
+    this._conversations = null;
+    this._discussion?.setOnContactAccepted(undefined);
+    this._announcement?.setConnectionPolicy(undefined);
+    await this._groups?.close();
+    this._groups = null;
 
     if (forceSecureNamespacePersistence && this._conn?.isSecureStorage) {
       let persistedStableState = false;
@@ -898,6 +1151,11 @@ class GossipSdk {
     // Clear message queues
     this.messageQueues.clear();
 
+    // Stop asking other nodes for the closed account's messages
+    this.state.messageProtocol.setWantedSeekers?.([]).catch(error => {
+      logger.warn('[GossipSdk] failed to clear wanted seekers', error);
+    });
+
     // Reset to initialized state
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -941,6 +1199,13 @@ class GossipSdk {
     this._lifecycleCloseActive = true;
     try {
       await this.closeSessionInternal();
+      if (this._wantedSeekersListener) {
+        this.eventEmitter.off(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+        this._wantedSeekersListener = null;
+      }
       this._queries = null;
       if (this._conn) {
         await this._conn.close();
@@ -1039,6 +1304,31 @@ class GossipSdk {
       throw new Error('No encryption key found. Call openSession() first.');
     }
     return state.session.toEncryptedBlob(state.encryptionKey);
+  }
+
+  /**
+   * Opens a new session with every peer a discussion was accepted with (the
+   * contacts and the automatic connections), with a new announcement to
+   * each, after the sessions were given up (`sessionReset`) or lost. Queued
+   * messages are kept and sent once each session is active. The caller
+   * persists the session state afterwards.
+   */
+  async rebuildMessagingSessions(): Promise<void> {
+    const owner = this.requireSession().session.userIdEncoded;
+    for (const discussion of await this.queries.discussions.getByOwner(owner)) {
+      if (
+        !discussion.weAccepted ||
+        discussion.contactUserId === SELF_CONTACT_ID
+      ) {
+        continue;
+      }
+      const reopened = await this.discussions.createSessionForContact(
+        discussion.contactUserId,
+        new Uint8Array(0),
+        { resetQueue: false, triggerRefresh: false }
+      );
+      if (!reopened.success) throw reopened.error;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1169,6 +1459,150 @@ class GossipSdk {
   }
 
   /**
+   * Re-encrypt the notes-to-self of `ownerUserId` from `oldKey` to `newKey`.
+   * Needs unlocked storage but no open session, so it can run inside a rekey
+   * candidate. Whoever replaces an account's profile key must call this, or
+   * the notes become unreadable.
+   */
+  async reencryptSelfMessages(
+    ownerUserId: string,
+    oldKey: EncryptionKey,
+    newKey: EncryptionKey
+  ): Promise<{ rewritten: number; unreadable: number }> {
+    if (!this._queries) {
+      throw new Error('Storage is locked');
+    }
+    return reencryptSelfMessages(this._queries, ownerUserId, oldKey, newKey);
+  }
+
+  /**
+   * Start fetching the current bulletin counter. Needs no open session, so
+   * account creation can issue the request up front and hand the promise to
+   * `announcements.skipHistorical(...)` once the account exists. The returned
+   * promise never rejects unhandled; a failure surfaces when it is awaited.
+   */
+  prefetchBulletinCounter(): Promise<string> {
+    if (this.state.status === SdkStatus.UNINITIALIZED) {
+      return Promise.reject(new Error('SDK not initialized'));
+    }
+    const request = this.state.messageProtocol.fetchBulletinCounter();
+    request.catch(() => {});
+    return request;
+  }
+
+  /**
+   * Start an in-place rekey: re-encrypt the whole store into a new
+   * generation, to set or change an account password or simply to refresh
+   * every key. Storage must be locked and no session open.
+   *
+   * Sequence:
+   *  1. `secureStorageBeginRekey()`
+   *  2. `secureStorageAdmitRekey(password, newPassword?)` once per account to
+   *     keep. Accounts that are not admitted are erased by the commit.
+   *     Optionally `secureStorageAdmitRekeyNew(password)` to create one new
+   *     account in a free slot.
+   *  3. `secureStorageBuildRekeyCandidate()`. From here `secureStorageUnlock`,
+   *     `queries`, `profiles`, session-blob calls and `secureStorageLock` act
+   *     on the in-memory candidate, so account contents can be rewritten
+   *     before anything durable changes.
+   *  4. `secureStorageCommitRekeyCandidate()`, or `secureStorageAbortRekey()`
+   *     at any point before it.
+   *
+   * Until the commit resolves, the durable store is only read.
+   */
+  async secureStorageBeginRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot rekey while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageBeginRekey();
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit one account to the active rekey. Resolves `false` when the
+   * passwords are not acceptable; it never says why, and never which account
+   * (if any) a password belongs to.
+   */
+  async secureStorageAdmitRekey(
+    password: string,
+    newPassword?: string
+  ): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekey(
+        password,
+        newPassword
+      );
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit a new, empty account to the active rekey (at most one). It is
+   * created in a free slot when the candidate is built, and is never
+   * reported. Resolves `false` when the password is not acceptable, without
+   * saying why: it opens an existing account, or another admitted account
+   * ends up with it.
+   */
+  async secureStorageAdmitRekeyNew(password: string): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekeyNew(password);
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  async secureStorageBuildRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageBuildRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Commit the rekey candidate atomically. Lock the candidate first. */
+  async secureStorageCommitRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot commit a rekey candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageCommitRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Abandon the rekey. Nothing durable has changed. */
+  async secureStorageAbortRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageAbortRekey();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
    * Open a brand-new encrypted session in the given slot, deriving the key
    * from `password`. Fresh storage requires an active onboarding candidate;
    * finish all account writes and locks before committing that candidate.
@@ -1186,6 +1620,7 @@ class GossipSdk {
    */
   async secureStorageCreate(slot: number, password: string): Promise<void> {
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const started = performance.now();
     try {
       const conn = this.requireConn();
       await conn.secureStorageCreate(slot, password);
@@ -1193,6 +1628,20 @@ class GossipSdk {
         this._queries = new Queries(conn);
         this._profile = this.createProfileService(this._queries);
       }
+      dlog(
+        'storage',
+        'storage.create',
+        { slot },
+        { lvl: 'info', dur: since(started), s: { password } }
+      );
+    } catch (error) {
+      dlog(
+        'storage',
+        'storage.create.failed',
+        { slot, ...errFields(error) },
+        { lvl: 'error', dur: since(started), s: { password } }
+      );
+      throw error;
     } finally {
       releaseLifecycle();
     }
@@ -1212,6 +1661,7 @@ class GossipSdk {
    */
   async secureStorageUnlock(password: string): Promise<boolean> {
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const started = performance.now();
     try {
       const conn = this.requireConn();
       const ok = await conn.secureStorageUnlock(password);
@@ -1219,7 +1669,20 @@ class GossipSdk {
         this._queries = new Queries(conn);
         this._profile = this.createProfileService(this._queries);
       }
+      dlog(
+        'storage',
+        'storage.unlock',
+        { ok },
+        { lvl: 'info', dur: since(started), s: { password } }
+      );
       return ok;
+    } catch (error) {
+      dlog('storage', 'storage.unlock.failed', errFields(error), {
+        lvl: 'error',
+        dur: since(started),
+        s: { password },
+      });
+      throw error;
     } finally {
       releaseLifecycle();
     }
@@ -1764,6 +2227,27 @@ class GossipSdk {
   }
 
   /** Contact management */
+  /**
+   * Conversations (§5.12): archives, direct chats and connections. Throws
+   * when the group engine could not be opened.
+   */
+  get conversations(): ConversationService {
+    this.requireSession();
+    if (!this._conversations) {
+      throw new Error('Conversation service not initialized');
+    }
+    return this._conversations;
+  }
+
+  /** Group chats. Throws when the group engine could not be opened. */
+  get groups(): GroupService {
+    this.requireSession();
+    if (!this._groups) {
+      throw new Error('Group service not initialized');
+    }
+    return this._groups;
+  }
+
   get contacts(): ContactService {
     this.requireSession();
     if (!this._contact) {
@@ -1943,9 +2427,9 @@ class GossipSdk {
    * through `onPersist`, and reschedule another flush if more changes
    * arrived during the write.
    */
-  private async flushPersist(): Promise<void> {
-    if (this.state.status !== SdkStatus.SESSION_OPEN) return;
-    if (!this._persistDirty) return;
+  private async flushPersist(): Promise<boolean> {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) return false;
+    if (!this._persistDirty) return true;
 
     this._persistInFlight = true;
     this._persistDirty = false;
@@ -1996,6 +2480,7 @@ class GossipSdk {
       // we left it at.
       this._persistBackoffMs = 0;
     }
+    const ok = !failed;
 
     // If state changed during the flush, schedule another tick.
     if (
@@ -2009,6 +2494,7 @@ class GossipSdk {
         void this.flushPersist();
       }, delay);
     }
+    return ok;
   }
 
   /**
@@ -2071,6 +2557,37 @@ class GossipSdk {
    * total tap-to-sent time stays bounded by `max(network, persist)`
    * rather than serially summed.
    */
+  /**
+   * Persists the session state as it is now, durably, or throws: a flush
+   * that started after this call is awaited and its failure is surfaced. A
+   * flush already in flight may have snapshotted an older state, so it is
+   * awaited and followed by another one when the state changed since.
+   *
+   * The group service calls it between encrypting a plaintext and storing
+   * the ciphertext, so that a crash never restarts the session from a state
+   * whose ciphertext was already stored for sending.
+   */
+  async persistSessionDurably(): Promise<void> {
+    for (let i = 0; i < GossipSdk.MAX_PERSIST_DRAIN_LOOPS; i++) {
+      if (this.state.status !== SdkStatus.SESSION_OPEN) {
+        throw new Error('The messaging session is closed');
+      }
+      if (this._persistInFlightPromise) {
+        await this._persistInFlightPromise;
+        continue;
+      }
+      if (!this._persistDirty) return;
+      if (this._persistTimer !== null) {
+        clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
+      if (!(await this.flushPersist())) {
+        throw new Error('The messaging session state was not persisted');
+      }
+    }
+    throw new Error('The messaging session state was not persisted');
+  }
+
   async awaitPendingPersist(): Promise<void> {
     if (this._persistInFlightPromise) {
       await this._persistInFlightPromise;

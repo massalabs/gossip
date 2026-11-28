@@ -1,8 +1,19 @@
 import { useEffect, useRef } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { useAppStore } from '../stores/appStore';
 import { useAccountStore } from '../stores/accountStore';
+
+/**
+ * Native auto-lock (Android `AppLock`, iOS `AppLockPlugin`): the WebView's
+ * JavaScript is paused in the background, so the timer that locks a phone
+ * left untouched runs natively. It locks the mesh node and the account's
+ * storage, and tears the UI down so that the next open shows the login
+ * screen. The listener below stays as a second line.
+ */
+const NativeAppLock = registerPlugin<{
+  configure(options: { timeoutSeconds: number | null }): Promise<void>;
+}>('AppLock');
 
 /**
  * Check whether the elapsed background time warrants a lock.
@@ -35,6 +46,13 @@ export function useAutoLock() {
   const userProfile = useAccountStore(s => s.userProfile);
   const logout = useAccountStore(s => s.logout);
   const backgroundTimestampRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    NativeAppLock.configure({
+      timeoutSeconds: userProfile ? autoLockTimeout : null,
+    }).catch(() => undefined);
+  }, [autoLockTimeout, userProfile]);
 
   useEffect(() => {
     // Only active when user is logged in and auto-lock is enabled
